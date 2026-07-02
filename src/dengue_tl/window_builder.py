@@ -29,4 +29,25 @@ def build_centrado(casos, config=JanelaCentradaConfig()):
       - alvos[i] == casos do dia central correspondente
       - dias de borda (sem contexto completo) são descartados
     """
-    raise NotImplementedError("Implementar na Etapa 2 do roteiro (TDD).")
+    casos = np.asarray(casos)
+    raio = config.raio
+    largura = 2 * raio + 1
+
+    janelas = []
+    alvos = []
+    # Só os dias com `raio` de contexto completo dos dois lados viram amostra;
+    # as bordas (primeiros/últimos `raio` dias) são descartadas.
+    for t in range(raio, len(casos) - raio):
+        vizinhanca = casos[t - raio : t + raio + 1]  # 2*raio+1 dias, centro em raio
+        if config.incluir_dia_central:
+            janela = vizinhanca
+        else:
+            # Remove o dia central para não vazar o alvo na imagem (CONTEXT.md §Vazamento).
+            janela = np.concatenate([vizinhanca[:raio], vizinhanca[raio + 1 :]])
+        janelas.append(janela)
+        alvos.append(casos[t])
+
+    comprimento = largura if config.incluir_dia_central else largura - 1
+    janelas = np.array(janelas).reshape(-1, comprimento)
+    alvos = np.array(alvos)
+    return janelas, alvos
