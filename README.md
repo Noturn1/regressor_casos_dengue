@@ -14,8 +14,8 @@ src/dengue_tl/
   ├── scaler.py          ← reaproveitado, PRONTO (log1p do alvo, min/max só do treino)
   ├── window_builder.py  ← PRONTO (Etapa 2): janela centrada de 9 dias
   ├── encoder.py         ← PRONTO (Etapa 4): GASF 100×100×3
-  └── model.py           ← STUB — implementar (Etapa 5): EfficientNet-B0
-tests/                   ← loader, scaler, window_builder e encoder passam (18 testes); model/runner faltam
+  └── model.py           ← PRONTO (Etapa 5): EfficientNet-B0
+tests/                   ← loader, scaler, window_builder, encoder e model passam (23 testes); runner (6–7) falta
 data/AmostraDados.csv    ← amostra para desenvolvimento (sem coluna de data)
 ```
 
@@ -35,8 +35,8 @@ data/AmostraDados.csv    ← amostra para desenvolvimento (sem coluna de data)
    ```
 
 3. **Seguir o `roteiro.md`.** Ordem dos módulos (cada um destrava o próximo):
-   `window_builder` (Etapa 2 ✅) → `encoder` (Etapa 4 ✅) → `model` (Etapa 5, **próximo**)
-   → treino/avaliação (Etapas 6–7). Escreva o teste antes da implementação (o repo segue TDD).
+   `window_builder` (Etapa 2 ✅) → `encoder` (Etapa 4 ✅) → `model` (Etapa 5 ✅)
+   → treino/avaliação (Etapas 6–7, **próximo**). Escreva o teste antes da implementação (o repo segue TDD).
 
 4. **Parte de deep learning** — o extra `dl` traz `pyts`+`scipy` (já usados pelo
    encoder da Etapa 4) e `tensorflow`+`pillow` (para o modelo, Etapa 5):
@@ -45,6 +45,11 @@ data/AmostraDados.csv    ← amostra para desenvolvimento (sem coluna de data)
    ```
    Treine de preferência no desktop com GPU (GTX 1060); no macOS, use para
    prototipar (o TensorFlow roda em CPU/Metal, mais lento).
+
+   > **macOS/Apple Silicon:** o `import tensorflow` dá *segfault* no Python 3.13
+   > do anaconda base. Use um **venv isolado** (`python -m venv venv`) e rode os
+   > testes de DL por ele: `venv/bin/python -m pytest`. Os testes de model usam
+   > `pytest.importorskip("tensorflow")`, então são pulados onde o extra `dl` não está.
 
 5. **Entrega** (ver `roteiro.md` §6): métricas do modelo **vs. baselines**
    (média / último valor), gráfico real × previsto, e uma nota honesta sobre o

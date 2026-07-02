@@ -50,7 +50,7 @@ O windower tem o flag `incluir_dia_central` (default **False**).
 | `scaler.py` | **pronto** (reaproveitado) | 3 |
 | `window_builder.py` | **pronto** — janela centrada | 2 |
 | `encoder.py` | **pronto** — GASF 100×100×3 | 4 |
-| `model.py` | STUB — EfficientNet-B0 | 5 |
+| `model.py` | **pronto** — EfficientNet-B0 | 5 |
 | runner + avaliação | a escrever | 6–7 |
 
 ---
@@ -104,13 +104,15 @@ Pré-computar e cachear as imagens (base pequena, ~6,5 mil dias) evita recodific
 - `pyts` reescala cada janela internamente (por-amostra, não é vazamento).
 - **TDD (feito):** shape `(100,100,3)`; 3 canais idênticos; matriz simétrica; determinismo; range `[-1,1]`; janela constante.
 
-### Etapa 5 — Modelo EfficientNet (`model.py`)
-- `EfficientNetB0(include_top=False, weights="imagenet", input_shape=(100,100,3))`
-  → `GlobalAveragePooling2D` → `Dropout` → `Dense(1)` linear.
+### Etapa 5 — Modelo EfficientNet (`model.py`) ✅
+- `build_model`: `EfficientNetB0(include_top=False, weights="imagenet", input_shape=(100,100,3))`
+  → `GlobalAveragePooling2D` → `Dropout` → `Dense(1)` linear (~4M params; 1281 treináveis na Fase 1).
   - **Fase 1:** backbone congelado, treina a cabeça (LR maior).
-  - **Fase 2:** descongela os últimos blocos, LR baixo.
-- **Atenção:** a `EfficientNetB0` do Keras já embute normalização; não normalizar duas vezes (§7).
-- **Smoke test:** lote `(batch,100,100,3)` → saída `(batch,1)`.
+  - **Fase 2:** `descongela_backbone(model, n_camadas_finais=20)`, LR baixo; BatchNorm fica congelada.
+- **§7 resolvido:** a `EfficientNetB0` do Keras embute Rescaling+Normalization e espera `[0,255]`;
+  como a GASF sai em `[-1,1]`, o modelo mapeia com `Rescaling(scale=127.5, offset=127.5)` — sem normalizar duas vezes.
+- **Smoke test (feito):** lote `(batch,100,100,3)` → saída `(batch,1)`; backbone congelado por padrão; saída linear.
+- **Ambiente:** rodar pelo venv — no Python 3.13 do anaconda base o `import tensorflow` dá *segfault* (ver README).
 
 ### Etapa 6 — Split temporal e treino
 - Treino nos anos iniciais, teste nos finais; validação = cauda do treino para
