@@ -12,10 +12,10 @@ Trabalho de disciplina: estimar os casos de dengue de um dia a partir de uma ima
 src/dengue_tl/
   ├── series_loader.py   ← reaproveitado, PRONTO (carrega/valida a série)
   ├── scaler.py          ← reaproveitado, PRONTO (log1p do alvo, min/max só do treino)
-  ├── window_builder.py  ← STUB — implementar (Etapa 2): janela centrada de 9 dias
-  ├── encoder.py         ← STUB — implementar (Etapa 4): GASF 100×100×3
-  └── model.py           ← STUB — implementar (Etapa 5): EfficientNet-B0
-tests/                   ← loader e scaler já passam; os demais você escreve (TDD)
+  ├── window_builder.py  ← PRONTO (Etapa 2): janela centrada de 9 dias
+  ├── encoder.py         ← PRONTO (Etapa 4): GASF 100×100×3
+  └── model.py           ← PRONTO (Etapa 5): EfficientNet-B0
+tests/                   ← loader, scaler, window_builder, encoder e model passam (23 testes); runner (6–7) falta
 data/AmostraDados.csv    ← amostra para desenvolvimento (sem coluna de data)
 ```
 
@@ -34,17 +34,22 @@ data/AmostraDados.csv    ← amostra para desenvolvimento (sem coluna de data)
    pytest
    ```
 
-3. **Seguir o `roteiro.md` a partir da Etapa 0.** Implementar os stubs nesta ordem
-   (cada um destrava o próximo):
-   `window_builder` (Etapa 2) → `encoder` (Etapa 4) → `model` (Etapa 5) → treino/avaliação (Etapas 6–7).
-   Escreva o teste antes da implementação (o repo já segue TDD).
+3. **Seguir o `roteiro.md`.** Ordem dos módulos (cada um destrava o próximo):
+   `window_builder` (Etapa 2 ✅) → `encoder` (Etapa 4 ✅) → `model` (Etapa 5 ✅)
+   → treino/avaliação (Etapas 6–7, **próximo**). Escreva o teste antes da implementação (o repo segue TDD).
 
-4. **Parte de deep learning** — instalar o extra só quando for treinar:
+4. **Parte de deep learning** — o extra `dl` traz `pyts`+`scipy` (já usados pelo
+   encoder da Etapa 4) e `tensorflow`+`pillow` (para o modelo, Etapa 5):
    ```bash
-   pip install -e ".[dev,dl]"     # + tensorflow, pyts, pillow, scipy
+   pip install -e ".[dev,dl]"     # tensorflow, pyts, pillow, scipy
    ```
    Treine de preferência no desktop com GPU (GTX 1060); no macOS, use para
    prototipar (o TensorFlow roda em CPU/Metal, mais lento).
+
+   > **macOS/Apple Silicon:** o `import tensorflow` dá *segfault* no Python 3.13
+   > do anaconda base. Use um **venv isolado** (`python -m venv venv`) e rode os
+   > testes de DL por ele: `venv/bin/python -m pytest`. Os testes de model usam
+   > `pytest.importorskip("tensorflow")`, então são pulados onde o extra `dl` não está.
 
 5. **Entrega** (ver `roteiro.md` §6): métricas do modelo **vs. baselines**
    (média / último valor), gráfico real × previsto, e uma nota honesta sobre o

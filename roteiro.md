@@ -48,9 +48,9 @@ O windower tem o flag `incluir_dia_central` (default **False**).
 |---|---|---|
 | `series_loader.py` | **pronto** (reaproveitado) | 1 |
 | `scaler.py` | **pronto** (reaproveitado) | 3 |
-| `window_builder.py` | STUB — janela centrada | 2 |
-| `encoder.py` | STUB — GASF 100×100×3 | 4 |
-| `model.py` | STUB — EfficientNet-B0 | 5 |
+| `window_builder.py` | **pronto** — janela centrada | 2 |
+| `encoder.py` | **pronto** — GASF 100×100×3 | 4 |
+| `model.py` | **pronto** — EfficientNet-B0 | 5 |
 | runner + avaliação | a escrever | 6–7 |
 
 ---
@@ -87,28 +87,32 @@ Pré-computar e cachear as imagens (base pequena, ~6,5 mil dias) evita recodific
 - `series_loader.load`. Na amostra sem coluna de data, usar índice sequencial.
 - **Checkpoint:** vetor 1-D contíguo de `Qtde_Casos`.
 
-### Etapa 2 — Janela centrada (`window_builder.py`)
-- Implementar `build_centrado(casos, config)`: para cada `t` com contexto completo,
+### Etapa 2 — Janela centrada (`window_builder.py`) ✅
+- `build_centrado(casos, config)`: para cada `t` com contexto completo,
   `alvo = casos[t]` e `janela` = os 8 vizinhos (ou 9, se `incluir_dia_central=True`).
-- **TDD:** nº de amostras = `N - 2*raio`; comprimento 8 ou 9; alvo é o dia central certo; bordas descartadas.
+- **TDD (feito):** nº de amostras = `N - 2*raio`; comprimento 8 ou 9; alvo é o dia central certo; bordas descartadas; raio configurável.
 
 ### Etapa 3 — Alvo e escalonamento
 - `Scaler`: `fit` **só no treino**; alvo em `log1p`.
 - **Checkpoint:** `inverse_target(transform_target(y)) == y`.
 
-### Etapa 4 — Encoder GASF (`encoder.py`)
+### Etapa 4 — Encoder GASF (`encoder.py`) ✅
 - `encode_gasf(janela) → (100,100,3)`: `GramianAngularField(method="summation")` →
-  resize `L×L→100×100` (bilinear) → replicar em 3 canais.
+  resize `L×L→100×100` → replicar em 3 canais.
+- Resize com `scipy.ndimage.zoom(order=1)`, **não** com o PIL: o resize float do
+  PIL (modo `'F'`) extrapolava fora de `[-1,1]` e gerava `NaN`.
 - `pyts` reescala cada janela internamente (por-amostra, não é vazamento).
-- **TDD:** shape `(100,100,3)`; 3 canais idênticos; matriz simétrica; determinismo.
+- **TDD (feito):** shape `(100,100,3)`; 3 canais idênticos; matriz simétrica; determinismo; range `[-1,1]`; janela constante.
 
-### Etapa 5 — Modelo EfficientNet (`model.py`)
-- `EfficientNetB0(include_top=False, weights="imagenet", input_shape=(100,100,3))`
-  → `GlobalAveragePooling2D` → `Dropout` → `Dense(1)` linear.
+### Etapa 5 — Modelo EfficientNet (`model.py`) ✅
+- `build_model`: `EfficientNetB0(include_top=False, weights="imagenet", input_shape=(100,100,3))`
+  → `GlobalAveragePooling2D` → `Dropout` → `Dense(1)` linear (~4M params; 1281 treináveis na Fase 1).
   - **Fase 1:** backbone congelado, treina a cabeça (LR maior).
-  - **Fase 2:** descongela os últimos blocos, LR baixo.
-- **Atenção:** a `EfficientNetB0` do Keras já embute normalização; não normalizar duas vezes (§7).
-- **Smoke test:** lote `(batch,100,100,3)` → saída `(batch,1)`.
+  - **Fase 2:** `descongela_backbone(model, n_camadas_finais=20)`, LR baixo; BatchNorm fica congelada.
+- **§7 resolvido:** a `EfficientNetB0` do Keras embute Rescaling+Normalization e espera `[0,255]`;
+  como a GASF sai em `[-1,1]`, o modelo mapeia com `Rescaling(scale=127.5, offset=127.5)` — sem normalizar duas vezes.
+- **Smoke test (feito):** lote `(batch,100,100,3)` → saída `(batch,1)`; backbone congelado por padrão; saída linear.
+- **Ambiente:** rodar pelo venv — no Python 3.13 do anaconda base o `import tensorflow` dá *segfault* (ver README).
 
 ### Etapa 6 — Split temporal e treino
 - Treino nos anos iniciais, teste nos finais; validação = cauda do treino para
