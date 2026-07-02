@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dengue-tl"
+version = "0.1.0"
+description = "Estimativa de casos de dengue com EfficientNet (transfer learning)"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "pandas",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+# Deep learning: instalado só quando for treinar (evita baixar TensorFlow para rodar o pipeline de dados).
+dl = ["tensorflow", "pyts", "pillow", "scipy"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dengue_tl"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
