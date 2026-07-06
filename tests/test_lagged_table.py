@@ -2,7 +2,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from dengue_tl.lagged_table import LaggedTableConfig, build_lagged_table
+from dengue_tl.lagged_table import (
+    LaggedTableConfig,
+    build_lagged_table,
+    build_or_load_lagged_table,
+)
 
 
 def _dados_exemplo(n=50):
@@ -62,6 +66,53 @@ def test_build_lagged_table_permite_custom_lags():
         "Qtde_Casos",
     ]
     assert len(tabela) == 40
+
+
+def test_build_lagged_table_funciona_sem_coluna_de_data():
+    # Dataset real de Cascavel não tem coluna 'Data': os lags devem operar
+    # posicionalmente (shift por linha), preservando a ordem do arquivo.
+    sem_data = _dados_exemplo().drop(columns=["Data"])
+
+    tabela = build_lagged_table(sem_data)
+
+    assert list(tabela.columns) == [
+        "Precipitacao_lag45",
+        "Temp_media_lag45",
+        "Umidade_rel_lag45",
+        "Historico_lag30",
+        "Qtde_Casos",
+    ]
+    assert len(tabela) == 5
+    # Mesmos valores defasados do caso com data, mas com índice posicional.
+    primeira = tabela.iloc[0]
+    assert primeira["Precipitacao_lag45"] == 1000.0
+    assert primeira["Historico_lag30"] == 4015.0
+    assert primeira["Qtde_Casos"] == 4045.0
+
+
+def test_build_or_load_cria_cache_quando_inexistente(tmp_path):
+    cache = tmp_path / "sub" / "tabela_lagged.csv"
+    assert not cache.exists()
+
+    tabela = build_or_load_lagged_table(_dados_exemplo().drop(columns=["Data"]), cache)
+
+    assert cache.exists()  # salvou em disco (criando a pasta)
+    recarregada = pd.read_csv(cache)
+    pd.testing.assert_frame_equal(
+        tabela.reset_index(drop=True), recarregada.reset_index(drop=True)
+    )
+
+
+def test_build_or_load_usa_cache_existente_sem_reconstruir(tmp_path):
+    cache = tmp_path / "tabela_lagged.csv"
+    # Cache pré-existente com conteúdo arbitrário: a função deve devolvê-lo
+    # como está, sem reconstruir a partir de `dados`.
+    marcador = pd.DataFrame({"Qtde_Casos": [1, 2, 3]})
+    marcador.to_csv(cache, index=False)
+
+    tabela = build_or_load_lagged_table("caminho/que/seria/ignorado.csv", cache)
+
+    pd.testing.assert_frame_equal(tabela, marcador)
 
 
 def test_build_lagged_table_erro_com_colunas_ausentes():
