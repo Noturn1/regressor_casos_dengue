@@ -1,5 +1,13 @@
 # Implementação detalhada — Runner de treino/validação
 
+> **Nota (atualização de arquitetura):** este documento descreve a **primeira
+> versão** do runner, baseada em janela univariada + GASF (`build_centrado` →
+> `encode_gasf`). O runner atual usa a **matriz 9×4 lagged**
+> (`lagged_table` → `matrix_windower` → `encode_matrix`); baseline de persistência
+> passou a ser o **histórico t-30**, e a entrada vem do dataset **sem coluna de
+> data**. Ver `roteiro.md` §4a e `GUIA_PROJETO.md` §3. As partes gerais abaixo
+> (split temporal, métricas, 2 fases, JSON) seguem válidas.
+
 Este documento explica, em nível técnico, a implementação do arquivo:
 
 - `src/dengue_tl/train_runner.py`
