@@ -116,3 +116,29 @@ def build_lagged_table(
     tabela = pd.concat([clima, historico, alvo], axis=1).dropna().copy()
     tabela.index.name = base.index.name
     return tabela
+
+
+def build_or_load_lagged_table(
+    dados,
+    cache_path,
+    config: LaggedTableConfig = LaggedTableConfig(),
+) -> pd.DataFrame:
+    """Materializa a tabela com lags em disco (cache).
+
+    - Se `cache_path` existe, carrega a tabela pronta (evita recomputar os
+      lags a cada execução).
+    - Se não existe, constrói via `build_lagged_table`, salva em `cache_path`
+      e retorna. Cria a pasta do cache se necessário.
+
+    A tabela é salva sem índice: como a série completa é dateless (índice
+    posicional), a ordem das linhas — preservada pelo CSV — é o que importa
+    para o janelamento posterior.
+    """
+    cache_path = Path(cache_path)
+    if cache_path.exists():
+        return pd.read_csv(cache_path)
+
+    tabela = build_lagged_table(dados, config)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    tabela.to_csv(cache_path, index=False)
+    return tabela

@@ -18,7 +18,28 @@ e o esforço vai para **validação honesta** e **qualidade da previsão** (§6)
 
 ---
 
-## 2. Especificações travadas
+## ⚠️ Atualização de arquitetura — entrada em matriz 9×4 (lagged)
+
+A entrada da rede **mudou** em relação ao plano original (GASF univariada). Agora:
+
+- Uma **tabela defasada** (`lagged_table.py`) alinha, em cada dia `t`: clima em
+  `t-45`, histórico de casos em `t-30` e o alvo `Qtde_Casos[t]`. É **cacheada em
+  disco** (`build_or_load_lagged_table`) — reconstruída só se o arquivo não existir.
+- Um **janelador** (`matrix_windower.py`) empilha **9 dias × 4 features** numa
+  **matriz 9×4** por dia central; `encoder.encode_matrix` a transforma em imagem
+  100×100×3 para a EfficientNet.
+- **Dataset:** `data/Dados 2007-2024.csv` (6575 dias, **sem coluna de data** — os
+  lags operam posicionalmente).
+- **Vazamento:** deixa de ser problema aqui — como as 4 features são defasadas
+  (≥30 dias), a janela `±4` nunca contém `Qtde_Casos[t]`; por isso a matriz é 9×4
+  (inclui o dia central) e não 8×4.
+
+As seções abaixo descrevem o plano **original** (GASF univariada), mantido como
+referência histórica; `window_builder`/`encode_gasf` continuam no repo e testados.
+
+---
+
+## 2. Especificações travadas (plano original — GASF univariada)
 
 - **Tarefa:** regressão — estimar `Qtde_Casos` do **dia central** de uma janela de 9 dias.
 - **Janela:** 9 dias, simétrica (dia central + 4 de cada lado). Deslizante, passo 1 dia.
@@ -48,14 +69,39 @@ O windower tem o flag `incluir_dia_central` (default **False**).
 |---|---|---|
 | `series_loader.py` | **pronto** (reaproveitado) | 1 |
 | `scaler.py` | **pronto** (reaproveitado) | 3 |
-| `window_builder.py` | **pronto** — janela centrada | 2 |
-| `encoder.py` | **pronto** — GASF 100×100×3 | 4 |
+| `window_builder.py` | **pronto** — janela centrada 1-D (trilha GASF original) | 2 |
+| `lagged_table.py` | **pronto** — tabela defasada + cache | — |
+| `matrix_windower.py` | **pronto** — janelas 9×4 da tabela | — |
+| `encoder.py` | **pronto** — `encode_gasf` + `encode_matrix` | 4 |
 | `model.py` | **pronto** — EfficientNet-B0 | 5 |
-| runner + avaliação | a escrever | 6–7 |
+| `train_runner.py` | **pronto** — pipeline 9×4 fim-a-fim | 6–7 |
 
 ---
 
-## 4. Arquitetura (pipeline único)
+## 4. Arquitetura
+
+### 4a. Pipeline atual (matriz 9×4 lagged) — implementado
+
+```
+CSV diário (4 variáveis, sem data)
+        │
+        ▼
+lagged_table: cada dia t → clima[t-45], histórico[t-30], alvo=Qtde_Casos[t]   (cache em disco)
+        │
+        ▼
+matrix_windower: 9 dias × 4 features → matriz 9×4 por dia central (alvo = casos[t])
+        │
+        ▼
+split temporal → escala por-feature (fit só no treino) → encode_matrix: 9×4 → 100×100×3
+        │
+        ▼
+EfficientNet-B0 (ImageNet) ─► GAP ─► Dropout ─► Dense(1) linear
+        │
+        ▼
+log1p ──► expm1 ──► casos estimados ──► MAE/RMSE/CC vs baselines (média / histórico t-30)
+```
+
+### 4b. Pipeline original (GASF univariada) — referência histórica
 
 ```
 série diária (Qtde_Casos)

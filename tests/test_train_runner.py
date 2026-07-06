@@ -3,13 +3,27 @@ import pandas as pd
 import pytest
 
 from dengue_tl.train_runner import (
+    SplitConfig,
     TreinoConfig,
-    baseline_ultimo_vizinho,
+    baseline_historico,
     calcula_metricas,
-    carrega_serie_casos,
+    carrega_tabela_lagged,
     treina_e_avalia,
     split_temporal,
 )
+
+
+def _csv_dateless(tmp_path, n):
+    csv = tmp_path / "dados.csv"
+    pd.DataFrame(
+        {
+            "Precipitacao": np.arange(n, dtype=float),
+            "Temp_media": 20 + np.arange(n, dtype=float),
+            "Umidade_rel": 70 + np.arange(n, dtype=float),
+            "Qtde_Casos": np.arange(n, dtype=float),
+        }
+    ).to_csv(csv, index=False)
+    return csv
 
 
 def test_split_temporal_preserva_ordem():
@@ -27,14 +41,15 @@ def test_split_temporal_erro_quando_inviavel():
         split_temporal(n_amostras=3, treino_fracao=0.9, validacao_fracao=0.09)
 
 
-def test_baseline_ultimo_vizinho_usa_t_menos_1():
-    # Com raio=4 e sem dia central, a janela e:
-    # [t-4, t-3, t-2, t-1, t+1, t+2, t+3, t+4]
-    janelas = np.array([[10, 11, 12, 13, 15, 16, 17, 18]], dtype=float)
+def test_baseline_historico_usa_dia_central():
+    # X: (n, 9, 4). Coluna 3 = Historico_lag30; linha central (raio=4) e o alvo.
+    X = np.zeros((2, 9, 4), dtype=float)
+    X[0, 4, 3] = 13.0  # historico do dia central da amostra 0
+    X[1, 4, 3] = 27.0
 
-    pred = baseline_ultimo_vizinho(janelas, raio=4, incluir_dia_central=False)
+    pred = baseline_historico(X, raio=4, idx_historico=3)
 
-    np.testing.assert_array_equal(pred, [13.0])
+    np.testing.assert_array_equal(pred, [13.0, 27.0])
 
 
 def test_calcula_metricas():
@@ -48,37 +63,27 @@ def test_calcula_metricas():
     assert metricas["cc"] == pytest.approx(0.5)
 
 
-def test_carrega_serie_casos_fallback_sem_data(tmp_path):
-    csv = tmp_path / "amostra.csv"
-    pd.DataFrame(
-        {
-            "Precipitacao": [1.0, 2.0, 3.0],
-            "Temp_media": [20.0, 21.0, 22.0],
-            "Umidade_rel": [70.0, 71.0, 72.0],
-            "Qtde_Casos": [5.0, 6.0, 7.0],
-        }
-    ).to_csv(csv, index=False)
+def test_carrega_tabela_lagged_dateless_e_cacheia(tmp_path):
+    csv = _csv_dateless(tmp_path, n=60)
+    cache = tmp_path / "cache" / "tabela.csv"
+    config = TreinoConfig(csv_path=str(csv), cache_path=str(cache))
 
-    casos = carrega_serie_casos(str(csv), date_column="Data")
+    tabela = carrega_tabela_lagged(config)
 
-    np.testing.assert_array_equal(casos, [5.0, 6.0, 7.0])
+    assert cache.exists()  # materializou o cache
+    assert list(tabela.columns) == [
+        "Precipitacao_lag45",
+        "Temp_media_lag45",
+        "Umidade_rel_lag45",
+        "Historico_lag30",
+        "Qtde_Casos",
+    ]
 
 
-def test_treina_e_avalia_erro_com_sugestao_quando_amostra_insuficiente(tmp_path):
-    csv = tmp_path / "amostra.csv"
-    pd.DataFrame(
-        {
-            "Precipitacao": np.arange(10, dtype=float),
-            "Temp_media": np.arange(10, dtype=float),
-            "Umidade_rel": np.arange(10, dtype=float),
-            "Qtde_Casos": np.arange(10, dtype=float),
-        }
-    ).to_csv(csv, index=False)
+def test_treina_e_avalia_erro_quando_amostra_insuficiente(tmp_path):
+    # 10 linhas com lag_clima=45 -> tabela lagged vazia -> sem amostras.
+    csv = _csv_dateless(tmp_path, n=10)
+    cache = tmp_path / "cache.csv"
 
-    with pytest.raises(ValueError, match=r"--raio <= 3"):
-        treina_e_avalia(
-            TreinoConfig(
-                csv_path=str(csv),
-                raio=4,
-            )
-        )
+    with pytest.raises(ValueError, match="Amostras insuficientes"):
+        treina_e_avalia(TreinoConfig(csv_path=str(csv), cache_path=str(cache)))

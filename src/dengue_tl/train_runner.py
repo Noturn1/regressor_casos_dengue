@@ -1,27 +1,33 @@
-"""Runner de treino/validacao para o pipeline de regressao de dengue.
+"""Runner de treino/validacao do pipeline de regressao de dengue (entrada 9x4).
 
-Este modulo "amarra" as etapas ja implementadas:
-1) carrega serie
-2) constroi janelas/alvos
-3) codifica em GASF
-4) faz split temporal treino/validacao/teste
+Amarra as etapas do pipeline atual:
+1) constroi (ou carrega do cache) a tabela lagged: clima em t-45, historico em t-30, alvo em t
+2) janela as features em matrizes 9x4 (dia central = alvo)
+3) split temporal treino/validacao/teste (sem embaralhar)
+4) escala as features por-coluna (fit so no treino) e codifica cada 9x4 em imagem
 5) treina EfficientNet em 2 fases
-6) avalia modelo e baselines
+6) avalia modelo e baselines (media do treino / historico t-30) na escala original
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 
+from dengue_tl.lagged_table import (
+    LaggedTableConfig,
+    build_or_load_lagged_table,
+)
+from dengue_tl.matrix_windower import (
+    MatrixWindowConfig,
+    build_matrix_windows,
+    feature_columns,
+)
 from dengue_tl.scaler import Scaler
-from dengue_tl.series_loader import load
-from dengue_tl.window_builder import JanelaCentradaConfig, build_centrado
 
 
 @dataclass(frozen=True)
@@ -33,9 +39,10 @@ class SplitConfig:
 @dataclass(frozen=True)
 class TreinoConfig:
     csv_path: str
-    date_column: str = "Data"
-    raio: int = 4
-    incluir_dia_central: bool = False
+    cache_path: str = "cache/tabela_lagged.csv"
+    lag_clima: int = 45
+    lag_historico: int = 30
+    raio: int = 4  # janela de 2*raio+1 == 9 linhas
     batch_size: int = 32
     epocas_fase1: int = 20
     epocas_fase2: int = 10
@@ -44,7 +51,7 @@ class TreinoConfig:
     learning_rate_fase2: float = 1e-4
     n_camadas_finais: int = 20
     seed: int = 42
-    split: SplitConfig = SplitConfig()
+    split: SplitConfig = field(default_factory=SplitConfig)
 
 
 def _min_amostras_para_split(
@@ -66,23 +73,19 @@ def _min_amostras_para_split(
     )
 
 
-def carrega_serie_casos(csv_path: str, date_column: str = "Data") -> np.ndarray:
-    """Carrega `Qtde_Casos` em ordem temporal.
+def carrega_tabela_lagged(config: TreinoConfig):
+    """Constroi (ou carrega do cache) a tabela lagged a partir do CSV.
 
-    - Se houver `date_column`, usa o loader oficial com validacao de contiguidade.
-    - Se nao houver `date_column` (caso da amostra), usa ordem sequencial do CSV.
+    Dateless: o dataset completo nao tem coluna de data; `build_lagged_table`
+    aplica os lags posicionalmente. O cache evita recomputar os lags.
     """
-    colunas = pd.read_csv(csv_path, nrows=0).columns.tolist()
-    if date_column in colunas:
-        serie = load(csv_path, date_column=date_column)
-        return serie["Qtde_Casos"].to_numpy(dtype=float)
-
-    if "Qtde_Casos" not in colunas:
-        raise ValueError(
-            f"CSV sem coluna '{date_column}' e sem coluna obrigatoria 'Qtde_Casos'."
-        )
-    df = pd.read_csv(csv_path)
-    return df["Qtde_Casos"].to_numpy(dtype=float)
+    return build_or_load_lagged_table(
+        config.csv_path,
+        config.cache_path,
+        LaggedTableConfig(
+            lag_clima=config.lag_clima, lag_historico=config.lag_historico
+        ),
+    )
 
 
 def split_temporal(
@@ -104,8 +107,10 @@ def split_temporal(
             "Split invalido para o tamanho da serie: ajuste fracoes ou use mais dados."
         )
 
-    return slice(0, fim_treino), slice(fim_treino, fim_validacao), slice(
-        fim_validacao, n_amostras
+    return (
+        slice(0, fim_treino),
+        slice(fim_treino, fim_validacao),
+        slice(fim_validacao, n_amostras),
     )
 
 
@@ -113,15 +118,13 @@ def baseline_media(y_treino: np.ndarray, tamanho: int) -> np.ndarray:
     return np.full(shape=(tamanho,), fill_value=float(np.mean(y_treino)), dtype=float)
 
 
-def baseline_ultimo_vizinho(
-    janelas: np.ndarray, raio: int, incluir_dia_central: bool
-) -> np.ndarray:
-    """Baseline persistente: usa o valor de t-1 disponivel na janela."""
-    if incluir_dia_central:
-        indice_t_menos_1 = raio - 1
-    else:
-        indice_t_menos_1 = raio - 1
-    return janelas[:, indice_t_menos_1].astype(float)
+def baseline_historico(X: np.ndarray, raio: int, idx_historico: int) -> np.ndarray:
+    """Baseline de persistencia: usa o historico de casos (t-30) do dia central.
+
+    E o valor de casos mais recente disponivel como feature; um estimador
+    ingenuo honesto para `Qtde_Casos[t]`.
+    """
+    return X[:, raio, idx_historico].astype(float)
 
 
 def mae(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -154,53 +157,53 @@ def treina_e_avalia(config: TreinoConfig) -> dict[str, object]:
     """Executa treino em 2 fases e avalia modelo + baselines."""
     _set_semente(config.seed)
 
-    casos = carrega_serie_casos(config.csv_path, date_column=config.date_column)
-    janelas, alvos = build_centrado(
-        casos,
-        JanelaCentradaConfig(
-            raio=config.raio, incluir_dia_central=config.incluir_dia_central
-        ),
-    )
+    tabela = carrega_tabela_lagged(config)
+    X, y = build_matrix_windows(tabela, MatrixWindowConfig(raio=config.raio))
+
     minimo_split = _min_amostras_para_split(
         treino_fracao=config.split.treino_fracao,
         validacao_fracao=config.split.validacao_fracao,
     )
-    if len(alvos) < minimo_split:
-        raio_maximo = (len(casos) - minimo_split) // 2
-        sugestao_raio = (
-            f"--raio <= {raio_maximo}" if raio_maximo >= 1 else "usar serie maior"
-        )
+    if len(y) < minimo_split:
         raise ValueError(
-            "Poucas amostras apos janela centrada para o split configurado. "
-            f"Linhas no CSV: {len(casos)}; raio atual: {config.raio}; "
-            f"amostras geradas: {len(alvos)}; minimo exigido: {minimo_split}. "
-            f"Sugestao: {sugestao_raio} (ou ajustar --treino-fracao/--validacao-fracao)."
+            "Amostras insuficientes apos aplicar lags e janela 9x4. "
+            f"Linhas na tabela lagged: {len(tabela)} (os primeiros "
+            f"{max(config.lag_clima, config.lag_historico)} dias somem no dropna dos lags); "
+            f"raio: {config.raio}; amostras 9x4 geradas: {len(y)}; minimo exigido: {minimo_split}. "
+            "Sugestao: usar uma serie maior ou reduzir --lag-clima/--lag-historico/--raio."
         )
 
     treino_sl, val_sl, teste_sl = split_temporal(
-        len(alvos),
+        len(y),
         treino_fracao=config.split.treino_fracao,
         validacao_fracao=config.split.validacao_fracao,
     )
 
-    # Baselines operam na escala original de casos.
-    y_treino_raw = alvos[treino_sl].astype(float)
-    y_teste_raw = alvos[teste_sl].astype(float)
+    # Baselines na escala original de casos (usam X/y nao escalados).
+    y_treino_raw = y[treino_sl].astype(float)
+    y_teste_raw = y[teste_sl].astype(float)
+    idx_historico = feature_columns(tabela).index(
+        f"Historico_lag{config.lag_historico}"
+    )
     baseline_media_pred = baseline_media(y_treino_raw, tamanho=len(y_teste_raw))
-    baseline_ultimo_pred = baseline_ultimo_vizinho(
-        janelas[teste_sl], raio=config.raio, incluir_dia_central=config.incluir_dia_central
+    baseline_historico_pred = baseline_historico(
+        X[teste_sl], raio=config.raio, idx_historico=idx_historico
     )
 
-    # Alvo do modelo em log1p, sempre fitado apenas no treino.
-    scaler = Scaler()
-    y_treino = scaler.transform_target(alvos[treino_sl])
-    y_val = scaler.transform_target(alvos[val_sl])
+    # Escala das features por-coluna: fit SO no treino (sem vazamento temporal).
+    scaler_x = Scaler().fit(X[treino_sl])
+    X_escalado = scaler_x.transform(X)
 
-    # Import lazy para permitir testes deste modulo sem dependencias de DL.
-    from dengue_tl.encoder import encode_gasf
+    # Alvo do modelo em log1p.
+    scaler_y = Scaler()
+    y_treino = scaler_y.transform_target(y[treino_sl])
+    y_val = scaler_y.transform_target(y[val_sl])
+
+    # Import lazy: permite testar a logica (split/baselines) sem dependencias de DL.
+    from dengue_tl.encoder import encode_matrix
     from dengue_tl.model import build_model, descongela_backbone, keras
 
-    imagens = np.stack([encode_gasf(j) for j in janelas], axis=0).astype("float32")
+    imagens = np.stack([encode_matrix(m) for m in X_escalado], axis=0).astype("float32")
     x_treino = imagens[treino_sl]
     x_val = imagens[val_sl]
     x_teste = imagens[teste_sl]
@@ -242,11 +245,7 @@ def treina_e_avalia(config: TreinoConfig) -> dict[str, object]:
     )
 
     y_pred_log = model.predict(x_teste, verbose=0).reshape(-1)
-    y_pred = scaler.inverse_target(y_pred_log)
-
-    metricas_modelo = calcula_metricas(y_teste_raw, y_pred)
-    metricas_baseline_media = calcula_metricas(y_teste_raw, baseline_media_pred)
-    metricas_baseline_ultimo = calcula_metricas(y_teste_raw, baseline_ultimo_pred)
+    y_pred = scaler_y.inverse_target(y_pred_log)
 
     return {
         "config": asdict(config),
@@ -260,36 +259,37 @@ def treina_e_avalia(config: TreinoConfig) -> dict[str, object]:
             "fase2": {k: [float(vv) for vv in v] for k, v in hist_fase2.history.items()},
         },
         "metricas": {
-            "modelo": metricas_modelo,
-            "baseline_media": metricas_baseline_media,
-            "baseline_ultimo_vizinho": metricas_baseline_ultimo,
+            "modelo": calcula_metricas(y_teste_raw, y_pred),
+            "baseline_media": calcula_metricas(y_teste_raw, baseline_media_pred),
+            "baseline_historico": calcula_metricas(y_teste_raw, baseline_historico_pred),
         },
         "predicoes_teste": {
             "y_true": [float(v) for v in y_teste_raw],
             "y_pred_modelo": [float(v) for v in y_pred],
             "y_pred_baseline_media": [float(v) for v in baseline_media_pred],
-            "y_pred_baseline_ultimo_vizinho": [float(v) for v in baseline_ultimo_pred],
+            "y_pred_baseline_historico": [float(v) for v in baseline_historico_pred],
         },
     }
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Treina e avalia o pipeline de regressao de dengue."
+        description="Treina e avalia o pipeline de regressao de dengue (entrada 9x4)."
     )
     parser.add_argument("--csv", required=True, help="Caminho para o CSV de entrada.")
     parser.add_argument(
-        "--date-column",
-        default="Data",
-        help="Coluna de data do CSV (se ausente, usa ordem sequencial).",
+        "--cache-path",
+        default="cache/tabela_lagged.csv",
+        help="Onde salvar/ler a tabela lagged (cache).",
     )
+    parser.add_argument("--lag-clima", type=int, default=45)
+    parser.add_argument("--lag-historico", type=int, default=30)
     parser.add_argument(
         "--output-json",
         default="resultados_treino.json",
         help="Arquivo JSON de saida com metricas e predicoes.",
     )
     parser.add_argument("--raio", type=int, default=4)
-    parser.add_argument("--incluir-dia-central", action="store_true")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--epocas-fase1", type=int, default=20)
     parser.add_argument("--epocas-fase2", type=int, default=10)
@@ -307,9 +307,10 @@ def main() -> None:
     args = _parse_args()
     config = TreinoConfig(
         csv_path=args.csv,
-        date_column=args.date_column,
+        cache_path=args.cache_path,
+        lag_clima=args.lag_clima,
+        lag_historico=args.lag_historico,
         raio=args.raio,
-        incluir_dia_central=args.incluir_dia_central,
         batch_size=args.batch_size,
         epocas_fase1=args.epocas_fase1,
         epocas_fase2=args.epocas_fase2,

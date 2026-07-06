@@ -12,11 +12,23 @@ Trabalho de disciplina: estimar os casos de dengue de um dia a partir de uma ima
 src/dengue_tl/
   ├── series_loader.py   ← reaproveitado, PRONTO (carrega/valida a série)
   ├── scaler.py          ← reaproveitado, PRONTO (log1p do alvo, min/max só do treino)
-  ├── window_builder.py  ← PRONTO (Etapa 2): janela centrada de 9 dias
-  ├── encoder.py         ← PRONTO (Etapa 4): GASF 100×100×3
-  └── model.py           ← PRONTO (Etapa 5): EfficientNet-B0
-tests/                   ← loader, scaler, window_builder, encoder e model passam (23 testes); runner (6–7) falta
-data/AmostraDados.csv    ← amostra para desenvolvimento (sem coluna de data)
+  ├── window_builder.py  ← PRONTO — trilha GASF univariada original (janela centrada)
+  ├── lagged_table.py    ← PRONTO — tabela defasada (clima t-45, histórico t-30) + cache
+  ├── matrix_windower.py ← PRONTO — janelas 9×4 (9 dias × 4 features) da tabela lagged
+  ├── encoder.py         ← PRONTO — encode_gasf (1-D) e encode_matrix (9×4) → 100×100×3
+  ├── model.py           ← PRONTO — EfficientNet-B0 (transfer learning)
+  └── train_runner.py    ← PRONTO — pipeline 9×4 fim-a-fim (tabela→janela→escala→treino→avaliação)
+tests/                   ← 48 testes passam (rodar pelo venv; os de DL usam importorskip)
+data/
+  ├── AmostraDados.csv       ← amostra p/ desenvolvimento (9 dias, sem coluna de data)
+  └── Dados 2007-2024.csv    ← dataset completo de Cascavel (6575 dias, sem coluna de data)
+```
+
+### Rodar o pipeline completo
+
+```bash
+venv/bin/python -m dengue_tl.train_runner --csv "data/Dados 2007-2024.csv"
+# gera cache/tabela_lagged.csv (cache dos lags) e resultados_treino.json (métricas + predições)
 ```
 
 ## Como proceder

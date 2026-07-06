@@ -8,11 +8,11 @@ Este documento resume **do que se trata o trabalho**, **o que já foi feito** e 
 
 O projeto estima `Qtde_Casos` de dengue de um dia (dia central) usando:
 
-1. uma janela temporal ao redor desse dia,
-2. transformação dessa janela em imagem **GASF**,
+1. uma tabela com features **defasadas** (clima em `t-45`, histórico de casos em `t-30`),
+2. uma **matriz 9×4** (9 dias × 4 features) transformada em imagem,
 3. regressão com **EfficientNet-B0** (transfer learning).
 
-A ideia é produzir uma estimativa coerente e avaliá-la de forma honesta com split temporal e comparação com baselines.
+A ideia é produzir uma estimativa coerente e avaliá-la de forma honesta com split temporal e comparação com baselines. (A abordagem original codificava uma janela univariada de `Qtde_Casos` em imagem **GASF**; ver §3.)
 
 ---
 
@@ -22,35 +22,36 @@ Os módulos base já estão prontos e cobertos por testes:
 
 - `series_loader.py` ✅
 - `scaler.py` ✅
-- `window_builder.py` ✅
-- `encoder.py` ✅
+- `window_builder.py` ✅ (trilha GASF univariada, original)
+- `lagged_table.py` ✅ (tabela defasada + cache em disco)
+- `matrix_windower.py` ✅ (janelas 9×4 da tabela lagged)
+- `encoder.py` ✅ (`encode_gasf` e `encode_matrix`)
 - `model.py` ✅
-- `train_runner.py` ✅
-- `lagged_table.py` ✅
+- `train_runner.py` ✅ (pipeline 9×4 fim-a-fim)
 
-Situação dos testes no ambiente atual: **23 passed, 1 skipped**  
-(o skip é de dependência de DL ausente no ambiente de execução do teste).
+Situação dos testes: **48 passed** (rodar pelo venv: `venv/bin/python -m pytest`;
+os testes de DL usam `importorskip` e são pulados fora do venv).
 
-As etapas 6 e 7 agora já têm implementação base via runner (treino/validação/teste, métricas e baselines).
-O que ainda pode ser evoluído são entregáveis adicionais como gráfico automático e execução multi-seed.
+O pipeline 9×4 roda de ponta a ponta sobre o dataset completo (`data/Dados 2007-2024.csv`,
+sem coluna de data). Entregáveis a evoluir: gráfico real × previsto automático e execução multi-seed.
 
 ---
 
 ## 3) Pipeline completo (visão de ponta a ponta)
 
-1. Carregar série diária (`series_loader.load`)
-2. Extrair `Qtde_Casos` e montar janelas centradas (`window_builder.build_centrado`)
-3. Codificar cada janela em imagem GASF (`encoder.encode_gasf`)
-4. Treinar modelo EfficientNet para regressão (`model.build_model`)
-5. Orquestrar treino/validação/teste (`train_runner.treina_e_avalia`)
-6. Avaliar previsões na escala original (`Scaler.inverse_target` com `expm1`)
-7. Medir métricas e comparar com baselines
+Pipeline **atual** (entrada em matriz 9×4 com features defasadas):
 
-Nova trilha de preprocessamento em paralelo:
+1. Montar/cachear a tabela lagged (`lagged_table.build_or_load_lagged_table`):
+   clima em `t-45`, histórico de casos em `t-30`, alvo `Qtde_Casos[t]`.
+2. Janelar 9 linhas × 4 features por dia central (`matrix_windower.build_matrix_windows`).
+3. Split temporal treino/val/teste e escala por-feature (fit só no treino, `Scaler`).
+4. Codificar cada matriz 9×4 em imagem 100×100×3 (`encoder.encode_matrix`).
+5. Treinar EfficientNet-B0 em 2 fases (`model.build_model` / `descongela_backbone`).
+6. Avaliar na escala original (`expm1`) e comparar com baselines (`train_runner.treina_e_avalia`).
 
-1. montar tabela supervisionada com lags (`lagged_table.build_lagged_table`)
-2. usar clima em `t-45` e histórico de casos em `t-30`
-3. treinar modelo tabular quando essa hipótese substituir o formato em janela
+> **Trilha original (GASF univariado), agora superada como entrada da rede:**
+> `window_builder.build_centrado` (janela 1-D de `Qtde_Casos`) → `encoder.encode_gasf`.
+> Os módulos continuam no repo (e testados), mas o runner usa a matriz 9×4.
 
 ---
 
