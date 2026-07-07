@@ -40,6 +40,7 @@ class SplitConfig:
 class TreinoConfig:
     csv_path: str
     cache_path: str = "cache/tabela_lagged.csv"
+    arquitetura: str = "cnn_lstm"  # ver dengue_tl.models.ARQUITETURAS
     lag_clima: int = 45
     lag_historico: int = 30
     raio: int = 4  # janela de 2*raio+1 == 9 linhas
@@ -200,49 +201,17 @@ def treina_e_avalia(config: TreinoConfig) -> dict[str, object]:
     y_val = scaler_y.transform_target(y[val_sl])
 
     # Import lazy: permite testar a logica (split/baselines) sem dependencias de DL.
-    from dengue_tl.encoder import encode_matrix
-    from dengue_tl.model import build_model, descongela_backbone, keras
+    # Cada arquitetura mora em seu arquivo (dengue_tl/models/) e implementa a
+    # mesma interface: prepara_entrada + treina. Ver dengue_tl.models.
+    from dengue_tl.models import seleciona_arquitetura
 
-    imagens = np.stack([encode_matrix(m) for m in X_escalado], axis=0).astype("float32")
-    x_treino = imagens[treino_sl]
-    x_val = imagens[val_sl]
-    x_teste = imagens[teste_sl]
+    modulo = seleciona_arquitetura(config.arquitetura)
+    entradas = modulo.prepara_entrada(X_escalado)
+    x_treino = entradas[treino_sl]
+    x_val = entradas[val_sl]
+    x_teste = entradas[teste_sl]
 
-    model = build_model(weights="imagenet")
-    optimizer_fase1 = keras.optimizers.Adam(learning_rate=config.learning_rate_fase1)
-    model.compile(optimizer=optimizer_fase1, loss="mse", metrics=["mae"])
-
-    callbacks = [
-        keras.callbacks.EarlyStopping(
-            monitor="val_loss",
-            patience=config.paciencia_early_stopping,
-            restore_best_weights=True,
-        )
-    ]
-
-    hist_fase1 = model.fit(
-        x_treino,
-        y_treino,
-        validation_data=(x_val, y_val),
-        epochs=config.epocas_fase1,
-        batch_size=config.batch_size,
-        verbose=0,
-        callbacks=callbacks,
-    )
-
-    model = descongela_backbone(model, n_camadas_finais=config.n_camadas_finais)
-    optimizer_fase2 = keras.optimizers.Adam(learning_rate=config.learning_rate_fase2)
-    model.compile(optimizer=optimizer_fase2, loss="mse", metrics=["mae"])
-
-    hist_fase2 = model.fit(
-        x_treino,
-        y_treino,
-        validation_data=(x_val, y_val),
-        epochs=config.epocas_fase2,
-        batch_size=config.batch_size,
-        verbose=0,
-        callbacks=callbacks,
-    )
+    model, historico = modulo.treina(x_treino, y_treino, x_val, y_val, config)
 
     y_pred_log = model.predict(x_teste, verbose=0).reshape(-1)
     y_pred = scaler_y.inverse_target(y_pred_log)
@@ -254,10 +223,7 @@ def treina_e_avalia(config: TreinoConfig) -> dict[str, object]:
             "validacao": [val_sl.start, val_sl.stop],
             "teste": [teste_sl.start, teste_sl.stop],
         },
-        "historico": {
-            "fase1": {k: [float(vv) for vv in v] for k, v in hist_fase1.history.items()},
-            "fase2": {k: [float(vv) for vv in v] for k, v in hist_fase2.history.items()},
-        },
+        "historico": historico,
         "metricas": {
             "modelo": calcula_metricas(y_teste_raw, y_pred),
             "baseline_media": calcula_metricas(y_teste_raw, baseline_media_pred),
@@ -277,6 +243,11 @@ def _parse_args() -> argparse.Namespace:
         description="Treina e avalia o pipeline de regressao de dengue (entrada 9x4)."
     )
     parser.add_argument("--csv", required=True, help="Caminho para o CSV de entrada.")
+    parser.add_argument(
+        "--arquitetura",
+        default="cnn_lstm",
+        help="Arquitetura do modelo (cnn_lstm | efficientnet).",
+    )
     parser.add_argument(
         "--cache-path",
         default="cache/tabela_lagged.csv",
@@ -308,6 +279,7 @@ def main() -> None:
     config = TreinoConfig(
         csv_path=args.csv,
         cache_path=args.cache_path,
+        arquitetura=args.arquitetura,
         lag_clima=args.lag_clima,
         lag_historico=args.lag_historico,
         raio=args.raio,

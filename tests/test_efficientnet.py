@@ -5,12 +5,17 @@ pytest.importorskip("tensorflow")  # modelo requer o extra `dl` (rodar no venv)
 
 from keras.layers import BatchNormalization
 
-from dengue_tl.model import BACKBONE_NOME, TAMANHO_IMAGEM, build_model, descongela_backbone
+from dengue_tl.models.efficientnet import (
+    BACKBONE_NOME,
+    TAMANHO_IMAGEM,
+    build_efficientnet,
+    descongela_backbone,
+)
 
 
 def _modelo_leve():
     # weights=None evita baixar os pesos ImageNet: smoke test rápido e offline.
-    return build_model(weights=None)
+    return build_efficientnet(weights=None)
 
 
 def test_smoke_saida_batch_1():
