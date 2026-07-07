@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from dengue_tl.series_loader import SeriesGapError, load
+from dengue_tl.series_loader import SeriesGapError, load, repara_valores_numericos
 
 VARIAVEIS_CLIMATICAS = ("Precipitacao", "Temp_media", "Umidade_rel")
 VARIAVEL_ALVO = "Qtde_Casos"
@@ -53,10 +53,10 @@ def _normaliza_entrada(dados, date_column: str) -> pd.DataFrame:
         cabecalho = pd.read_csv(caminho, nrows=0).columns.tolist()
         if date_column in cabecalho:
             return load(caminho, date_column=date_column)
-        return pd.read_csv(caminho)
+        return repara_valores_numericos(pd.read_csv(caminho))
 
     if isinstance(dados, pd.DataFrame):
-        base = dados.copy()
+        base = repara_valores_numericos(dados)
         if date_column in base.columns:
             base[date_column] = pd.to_datetime(base[date_column])
             base = base.sort_values(date_column).set_index(date_column)
