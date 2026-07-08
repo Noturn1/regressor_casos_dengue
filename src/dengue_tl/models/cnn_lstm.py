@@ -12,8 +12,8 @@ contrário do backbone de visão. Requer o extra `dl` (tensorflow).
 
 from __future__ import annotations
 
-import numpy as np
 import keras
+import numpy as np
 from keras import layers
 
 
@@ -25,8 +25,8 @@ def build_cnn_lstm(input_shape=(9, 4), filtros=32, unidades_lstm=32, dropout=0.3
     - `Dense(1)` linear: regressão, sem ativação de saída.
     """
     inputs = keras.Input(shape=input_shape)
-    x = layers.Conv1D(filtros, kernel_size=3, padding="same", activation="relu")(inputs)
-    x = layers.Conv1D(filtros, kernel_size=3, padding="same", activation="relu")(x)
+    x = layers.Conv1D(filtros, kernel_size=2, padding="same", activation="relu")(inputs)
+    x = layers.Conv1D(filtros, kernel_size=2, padding="same", activation="relu")(x)
     x = layers.LSTM(unidades_lstm)(x)
     x = layers.Dropout(dropout)(x)
     outputs = layers.Dense(1)(x)
@@ -46,7 +46,12 @@ def treina(x_treino, y_treino, x_val, y_val, config):
     """
     keras.utils.set_random_seed(config.seed)
 
-    model = build_cnn_lstm(input_shape=x_treino.shape[1:])
+    model = build_cnn_lstm(
+        input_shape=x_treino.shape[1:],
+        filtros=config.filtros,
+        unidades_lstm=config.unidades_lstm,
+        dropout=config.dropout,
+    )
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=config.learning_rate_fase1),
         loss="mse",
@@ -71,5 +76,20 @@ def treina(x_treino, y_treino, x_val, y_val, config):
         callbacks=callbacks,
     )
 
-    historico = {"treino": {k: [float(v) for v in vs] for k, vs in hist.history.items()}}
+    historico = {
+        "treino": {k: [float(v) for v in vs] for k, vs in hist.history.items()}
+    }
     return model, historico
+
+
+def espaco_busca(trial) -> dict:
+    """Espaço de busca do Optuna. As chaves são campos de `TreinoConfig`."""
+    return {
+        "filtros": trial.suggest_categorical("filtros", [16, 32, 64, 128]),
+        "unidades_lstm": trial.suggest_categorical("unidades_lstm", [16, 32, 64, 128]),
+        "dropout": trial.suggest_float("dropout", 0.0, 0.5),
+        "learning_rate_fase1": trial.suggest_float(
+            "learning_rate_fase1", 1e-4, 1e-2, log=True
+        ),
+        "batch_size": trial.suggest_categorical("batch_size", [16, 32, 64]),
+    }

@@ -8,7 +8,9 @@ novo que implemente):
   que a rede espera (imagem, sequência, tabela...);
 - ``treina(x_treino, y_treino, x_val, y_val, config) -> (model, historico)``:
   constrói, treina e devolve o modelo Keras e o histórico de treino
-  (dict ``{fase: {metrica: [valores por época]}}``).
+  (dict ``{fase: {metrica: [valores por época]}}``);
+- ``espaco_busca(trial) -> dict``: espaço de busca de hiperparâmetros para o
+  Optuna (``tune_runner``); as chaves devem ser campos de ``TreinoConfig``.
 
 `seleciona_arquitetura` faz import preguiçoso do módulo — importar este pacote
 não puxa TensorFlow; só a arquitetura escolhida carrega Keras.
@@ -16,7 +18,7 @@ não puxa TensorFlow; só a arquitetura escolhida carrega Keras.
 
 from __future__ import annotations
 
-ARQUITETURAS = ("cnn_lstm", "efficientnet")
+ARQUITETURAS = ("cnn_lstm", "cnn2d", "efficientnet")
 
 
 def seleciona_arquitetura(nome: str):
@@ -25,6 +27,10 @@ def seleciona_arquitetura(nome: str):
         from dengue_tl.models import cnn_lstm
 
         return cnn_lstm
+    if nome == "cnn2d":
+        from dengue_tl.models import cnn2d
+
+        return cnn2d
     if nome == "efficientnet":
         from dengue_tl.models import efficientnet
 
