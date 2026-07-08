@@ -44,7 +44,12 @@ def _prepara_entradas(tmp_path, n=40):
 
     y_true = rng.uniform(0, 100, n).tolist()
     resultados = {
-        "config": {"raio": 4, "lag_clima": 45, "lag_historico": 30},
+        "config": {
+            "arquitetura": "cnn_lstm",
+            "raio": 4,
+            "lag_clima": 45,
+            "lag_historico": 30,
+        },
         "split": {"treino": [0, 28], "validacao": [28, 34], "teste": [34, 40]},
         "metricas": {
             "modelo": {"mae": 38.1, "rmse": 107.4, "cc": 0.63},
@@ -75,6 +80,35 @@ def test_save_all_gera_todos_os_artefatos(tmp_path):
     for caminho in artefatos.values():
         assert caminho.exists(), f"artefato ausente: {caminho}"
         assert caminho.stat().st_size > 0
+
+
+def test_save_all_separa_saida_por_arquitetura(tmp_path):
+    # Artefatos de arquiteturas diferentes nao devem se sobrescrever:
+    # cada uma ganha uma subpasta com seu nome dentro da pasta base.
+    csv_path, results_path = _prepara_entradas(tmp_path)
+    saida = tmp_path / "saida"
+
+    artefatos = save_all_report_artifacts(
+        csv_path, results_path, output_dir=saida, dpi=60
+    )
+
+    for caminho in artefatos.values():
+        assert caminho.parent == saida / "cnn_lstm"
+
+
+def test_save_all_usa_pasta_modelo_sem_arquitetura_no_json(tmp_path):
+    csv_path, results_path = _prepara_entradas(tmp_path)
+    resultados = json.loads(results_path.read_text())
+    del resultados["config"]["arquitetura"]
+    results_path.write_text(json.dumps(resultados))
+    saida = tmp_path / "saida"
+
+    artefatos = save_all_report_artifacts(
+        csv_path, results_path, output_dir=saida, dpi=60
+    )
+
+    for caminho in artefatos.values():
+        assert caminho.parent == saida / "modelo"
 
 
 def test_save_all_repara_valores_corrompidos_na_estrutura(tmp_path):
