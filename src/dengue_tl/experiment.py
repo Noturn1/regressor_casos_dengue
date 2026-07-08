@@ -192,6 +192,17 @@ def _parse_args() -> argparse.Namespace:
         default=7,
         help="Janela da media movel centrada do alvo (0/1 desativa).",
     )
+    parser.add_argument(
+        "--sazonalidade",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Adiciona sin/cos do dia-do-ano como features (--no-sazonalidade desativa).",
+    )
+    parser.add_argument(
+        "--data-inicial",
+        default="2007-01-01",
+        help="Data do 1o registro (serie dateless), base do calendario sazonal.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--treino-fracao", type=float, default=0.7)
     parser.add_argument("--validacao-fracao", type=float, default=0.15)
@@ -230,6 +241,8 @@ def main() -> None:
         dropout=args.dropout,
         alvo=args.alvo,
         suavizacao_alvo=args.suavizacao_alvo,
+        sazonalidade=args.sazonalidade,
+        data_inicial=args.data_inicial,
         seed=args.seed,
         split=SplitConfig(
             treino_fracao=args.treino_fracao,

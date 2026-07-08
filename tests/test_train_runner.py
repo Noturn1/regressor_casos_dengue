@@ -63,19 +63,43 @@ def test_calcula_metricas():
     assert metricas["cc"] == pytest.approx(0.5)
 
 
-def test_carrega_tabela_lagged_dateless_e_cacheia(tmp_path):
+def test_carrega_tabela_lagged_dateless_sem_sazonalidade(tmp_path):
+    csv = _csv_dateless(tmp_path, n=60)
+    cache = tmp_path / "cache" / "tabela.csv"
+    config = TreinoConfig(
+        csv_path=str(csv), cache_path=str(cache), sazonalidade=False
+    )
+
+    tabela = carrega_tabela_lagged(config)
+
+    assert cache.exists()  # materializou o cache no caminho pedido
+    assert list(tabela.columns) == [
+        "Precipitacao_lag45",
+        "Temp_media_lag45",
+        "Umidade_rel_lag45",
+        "Historico_lag30",
+        "Qtde_Casos",
+    ]
+
+
+def test_carrega_tabela_lagged_sazonal_usa_cache_sufixado(tmp_path):
+    # Com sazonalidade (default), o cache ganha sufixo _sazonal para nao reusar
+    # silenciosamente uma tabela de 4 features, e as colunas ganham sin/cos.
     csv = _csv_dateless(tmp_path, n=60)
     cache = tmp_path / "cache" / "tabela.csv"
     config = TreinoConfig(csv_path=str(csv), cache_path=str(cache))
 
     tabela = carrega_tabela_lagged(config)
 
-    assert cache.exists()  # materializou o cache
+    assert not cache.exists()
+    assert (tmp_path / "cache" / "tabela_sazonal.csv").exists()
     assert list(tabela.columns) == [
         "Precipitacao_lag45",
         "Temp_media_lag45",
         "Umidade_rel_lag45",
         "Historico_lag30",
+        "sin_ano",
+        "cos_ano",
         "Qtde_Casos",
     ]
 

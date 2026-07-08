@@ -58,6 +58,23 @@ na escala original**. O teste nunca entra na busca: só é usado uma vez, no ret
 com a melhor configuração. Os dados são preparados uma única vez (`prepara_dados`) e
 reutilizados por todos os trials.
 
+**Sazonalidade** (padrão desde jul/2026): a dengue em Cascavel é fortemente
+sazonal — jan–mai concentra ~94% dos casos, com pico em mar–abr e ~0 de jul–dez.
+Como o dataset é dateless mas diário e contíguo, o calendário é reconstruível
+exatamente (6575 linhas = 2007-01-01…2024-12-31). Codifica-se o **dia-do-ano do
+dia central** `t` como par `sin_ano`/`cos_ano` (período 365.25; o par evita a
+descontinuidade 31/dez→1/jan) e ele entra como **duas features extras** na matriz
+(9×4 → 9×6). **Não é vazamento**: o calendário é conhecido de antemão para
+qualquer data — feature exógena de futuro conhecido, diferente das variáveis de
+caso/clima, que exigem lag. Ligado por padrão (`LaggedTableConfig.sazonalidade`
+default é `False` para preservar o contrato básico da tabela; `TreinoConfig`
+liga). Flags: `--no-sazonalidade` desativa; `--data-inicial` fixa a data-base do
+calendário para séries dateless. O cache ganha sufixo `_sazonal` para não reusar
+silenciosamente uma tabela de 4 features. **Efeito observado**: sobe a correlação
+de forma consistente (o modelo passa a enxergar a fase do ano); converter isso em
+ganho de MAE exige **re-tunar os hiperparâmetros** (os antigos foram buscados
+sobre 4 features).
+
 ## Fatos dos dados
 
 - Série diária, contígua, sem faltantes. A base completa tem coluna de data; a amostra

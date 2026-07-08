@@ -67,6 +67,12 @@ class TreinoConfig:
     # antes do treino/avaliacao: o serrilhado semanal de notificacao e ruido
     # de registro, nao sinal. 0 ou 1 desativam.
     suavizacao_alvo: int = 7
+    # Sazonalidade: adiciona sin/cos do dia-do-ano do dia central como features
+    # (ver LaggedTableConfig). Ligado por padrao — a dengue e fortemente sazonal
+    # (jan-mai concentra ~94% dos casos) e o calendario e futuro conhecido, nao
+    # vazamento.
+    sazonalidade: bool = True
+    data_inicial: str = "2007-01-01"
     seed: int = 42
     split: SplitConfig = field(default_factory=SplitConfig)
 
@@ -90,6 +96,15 @@ def _min_amostras_para_split(
     )
 
 
+def _cache_path_efetivo(config: TreinoConfig) -> str:
+    """Cache separado quando ha sazonalidade: evita reusar silenciosamente uma
+    tabela de 4 features (sem sin/cos) quando a flag esta ligada, e vice-versa."""
+    if not config.sazonalidade:
+        return config.cache_path
+    p = Path(config.cache_path)
+    return str(p.with_name(f"{p.stem}_sazonal{p.suffix}"))
+
+
 def carrega_tabela_lagged(config: TreinoConfig):
     """Constroi (ou carrega do cache) a tabela lagged a partir do CSV.
 
@@ -98,9 +113,12 @@ def carrega_tabela_lagged(config: TreinoConfig):
     """
     return build_or_load_lagged_table(
         config.csv_path,
-        config.cache_path,
+        _cache_path_efetivo(config),
         LaggedTableConfig(
-            lag_clima=config.lag_clima, lag_historico=config.lag_historico
+            lag_clima=config.lag_clima,
+            lag_historico=config.lag_historico,
+            sazonalidade=config.sazonalidade,
+            data_inicial=config.data_inicial,
         ),
     )
 
@@ -441,6 +459,17 @@ def _parse_args() -> argparse.Namespace:
         default=7,
         help="Janela da media movel centrada do alvo (0/1 desativa).",
     )
+    parser.add_argument(
+        "--sazonalidade",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Adiciona sin/cos do dia-do-ano como features (--no-sazonalidade desativa).",
+    )
+    parser.add_argument(
+        "--data-inicial",
+        default="2007-01-01",
+        help="Data do 1o registro (serie dateless), base do calendario sazonal.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--treino-fracao", type=float, default=0.7)
     parser.add_argument("--validacao-fracao", type=float, default=0.15)
@@ -469,6 +498,8 @@ def main() -> None:
         dropout=args.dropout,
         alvo=args.alvo,
         suavizacao_alvo=args.suavizacao_alvo,
+        sazonalidade=args.sazonalidade,
+        data_inicial=args.data_inicial,
         seed=args.seed,
         split=SplitConfig(
             treino_fracao=args.treino_fracao,

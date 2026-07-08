@@ -90,6 +90,51 @@ def test_build_lagged_table_funciona_sem_coluna_de_data():
     assert primeira["Qtde_Casos"] == 4045.0
 
 
+def test_sazonalidade_adiciona_sin_cos_antes_do_alvo():
+    tabela = build_lagged_table(
+        _dados_exemplo(), LaggedTableConfig(sazonalidade=True)
+    )
+
+    assert list(tabela.columns) == [
+        "Precipitacao_lag45",
+        "Temp_media_lag45",
+        "Umidade_rel_lag45",
+        "Historico_lag30",
+        "sin_ano",
+        "cos_ano",
+        "Qtde_Casos",
+    ]
+    # Par unitario: sin^2 + cos^2 == 1 em toda linha.
+    np.testing.assert_allclose(
+        tabela["sin_ano"] ** 2 + tabela["cos_ano"] ** 2, 1.0
+    )
+
+
+def test_sazonalidade_usa_o_calendario_da_linha():
+    # Primeira linha remanescente e 2020-02-15 (dia-do-ano 46).
+    tabela = build_lagged_table(
+        _dados_exemplo(), LaggedTableConfig(sazonalidade=True)
+    )
+
+    angulo = 2.0 * np.pi * 46 / 365.25
+    assert tabela.iloc[0]["sin_ano"] == pytest.approx(np.sin(angulo))
+    assert tabela.iloc[0]["cos_ano"] == pytest.approx(np.cos(angulo))
+
+
+def test_sazonalidade_sem_data_reconstroi_a_partir_de_data_inicial():
+    # Serie dateless: as datas vem de data_inicial + posicao. Comeca em
+    # 2007-01-01, entao a 1a linha remanescente (posicao 45) e 2007-02-15.
+    sem_data = _dados_exemplo().drop(columns=["Data"])
+
+    tabela = build_lagged_table(
+        sem_data, LaggedTableConfig(sazonalidade=True, data_inicial="2007-01-01")
+    )
+
+    dia_do_ano = pd.Timestamp("2007-02-15").dayofyear  # 46
+    angulo = 2.0 * np.pi * dia_do_ano / 365.25
+    assert tabela.iloc[0]["sin_ano"] == pytest.approx(np.sin(angulo))
+
+
 def test_build_or_load_cria_cache_quando_inexistente(tmp_path):
     cache = tmp_path / "sub" / "tabela_lagged.csv"
     assert not cache.exists()
