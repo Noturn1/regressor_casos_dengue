@@ -90,16 +90,55 @@ def test_treina_e_avalia_erro_quando_amostra_insuficiente(tmp_path):
 
 
 def test_preve_casos_limita_explosao_do_expm1():
-    from dengue_tl.scaler import Scaler
-    from dengue_tl.train_runner import preve_casos
+    from dengue_tl.train_runner import TransformadorAlvo, preve_casos
 
     class ModeloExplosivo:
         def predict(self, x, verbose=0):
-            # log 20 viraria ~5e8 casos no expm1; -3 viraria contagem negativa.
-            return np.array([[20.0], [-3.0], [2.0]])
+            # log 40 viraria ~2e17 casos no expm1; -3 viraria contagem negativa.
+            return np.array([[40.0], [-3.0], [2.0]])
 
+    transformador = TransformadorAlvo(alvo="nivel", teto_log=np.log1p(100.0))
     pred = preve_casos(
-        ModeloExplosivo(), x=None, scaler_y=Scaler(), teto_log=np.log1p(100.0)
+        ModeloExplosivo(), x=None, transformador=transformador, historico=None
     )
 
     np.testing.assert_allclose(pred, [100.0, 0.0, np.expm1(2.0)], rtol=1e-6)
+
+
+def test_transformador_razao_ida_e_volta():
+    from dengue_tl.train_runner import TransformadorAlvo
+
+    transformador = TransformadorAlvo(alvo="razao", teto_log=np.log1p(1e6))
+    casos = np.array([0.0, 30.0, 600.0])
+    historico = np.array([5.0, 30.0, 200.0])
+
+    y_modelo = transformador.transforma(casos, historico)
+    recuperado = transformador.inverte(y_modelo, historico)
+
+    np.testing.assert_allclose(recuperado, casos, rtol=1e-9)
+
+
+def test_transformador_razao_zero_e_o_baseline_de_persistencia():
+    # Prever 0 na formulacao razao == repetir o historico: qualquer coisa que a
+    # rede aprender e ganho sobre o baseline.
+    from dengue_tl.train_runner import TransformadorAlvo
+
+    transformador = TransformadorAlvo(alvo="razao", teto_log=np.log1p(1e6))
+    historico = np.array([0.0, 7.0, 250.0])
+
+    pred = transformador.inverte(np.zeros(3), historico)
+
+    np.testing.assert_allclose(pred, historico, rtol=1e-9)
+
+
+def test_media_movel_centrada_suaviza_serrilhado():
+    from dengue_tl.train_runner import _media_movel_centrada
+
+    serrilhado = np.array([0.0, 14.0, 0.0, 14.0, 0.0, 14.0, 0.0], dtype=float)
+
+    suave = _media_movel_centrada(serrilhado, janela=7)
+
+    assert suave[3] == pytest.approx(6.0)  # media exata da janela cheia
+    assert np.ptp(suave) < np.ptp(serrilhado)  # amplitude reduzida
+    # janela <= 1 nao altera nada
+    np.testing.assert_array_equal(_media_movel_centrada(serrilhado, 1), serrilhado)

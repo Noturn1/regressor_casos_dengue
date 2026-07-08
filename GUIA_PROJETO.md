@@ -121,6 +121,7 @@ No `model.py`, há mapeamento explícito de `[-1, 1]` para `[0, 255]` antes do b
 - `encoder.py` — `encode_gasf` (1-D → GASF) e `encode_matrix` (9×4 → 100×100×3).
 - `models/__init__.py` — `seleciona_arquitetura(nome)`: import preguiçoso do módulo pedido.
 - `models/cnn_lstm.py` — Conv1D × 2 + LSTM + Dense(1); treino em fase única.
+- `models/cnn2d.py` — Conv2D(32)→Conv2D(64) 2×2 + Dense(64) sobre a janela transposta (4, 9, 1); spec do professor, sem pooling.
 - `models/efficientnet.py` — EfficientNet-B0 com cabeça densa; treino em 2 fases (congelar → fine-tune).
 - `train_runner.py` — pipeline 9×4 agnóstico à arquitetura: tabela → janela → escala → treino → métricas + baselines.
 - `tune_runner.py` — busca de hiperparâmetros (Optuna/TPE): minimiza o MAE de validação e retreina/avalia a melhor config no teste.

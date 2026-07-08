@@ -49,9 +49,7 @@ def _objetivo(trial, dados: DadosPreparados, config_base: TreinoConfig) -> float
         dados.x_treino, dados.y_treino, dados.x_val, dados.y_val, config
     )
 
-    y_pred = preve_casos(
-        model, dados.x_val, dados.scaler_y, teto_log=float(dados.y_treino.max())
-    )
+    y_pred = preve_casos(model, dados.x_val, dados.transformador, dados.hist_val)
     return mae(dados.y_val_raw, y_pred)
 
 

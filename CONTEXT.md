@@ -35,6 +35,23 @@ informação.
 
 **Arquitetura alternativa**: EfficientNet-B0 pré-treinada (ImageNet) — requer codificar a janela 9×4 em imagem 100×100×3 via `encode_matrix`. Treino em 2 fases (backbone congelado → fine-tune). Seleção via `--arquitetura` em `experiment.py`.
 
+**Arquitetura cnn2d** (recomendação do professor): CNN 2D pura sobre a janela transposta
+`(4, 9, 1)` — Conv2D(32)→Conv2D(64), kernels 2×2 `same`, Flatten, Dense(64), Dense(1).
+Sem pooling (entrada minúscula) e sem codificação em imagem. A spec original não tem
+dropout (`--dropout 0` a reproduz exatamente).
+
+**Formulação do alvo** (padrão desde jul/2026): o modelo aprende a **log-razão**
+`log1p(casos) − log1p(Historico_lag30)` — o crescimento em ~30 dias — em vez do nível
+absoluto. Motivo: o treino (2007–~2019) tem máximo de 34 casos/dia e o teste chega a 692;
+prever nível não transfere entre regimes (o modelo saturava em ~34 e era matematicamente
+incapaz de bater o RMSE do baseline). Na razão, prever 0 == baseline de persistência, e a
+formulação é invariante à escala do surto. O alvo (e o histórico do denominador) é
+**suavizado com média móvel 7d centrada** — o serrilhado semanal é ruído de notificação —
+e as métricas são reportadas nas duas escalas (bruta e `metricas_alvo_suavizado`). O clip
+da predição é só anti-explosão do `expm1` (~1000× o máximo do treino), não um teto
+epidemiológico. Flags: `--alvo nivel` e `--suavizacao-alvo 0` reproduzem o comportamento
+antigo.
+
 **Otimização de hiperparâmetros**: `tune_runner.py` roda uma busca Optuna (TPE) sobre o
 `espaco_busca` declarado no módulo de cada arquitetura, minimizando o **MAE de validação
 na escala original**. O teste nunca entra na busca: só é usado uma vez, no retreino final
