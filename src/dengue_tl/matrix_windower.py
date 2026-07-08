@@ -1,4 +1,4 @@
-"""Janelas 9x4 a partir da tabela lagged (entrada da EfficientNet).
+"""Janelas 9x4 a partir da tabela lagged (entrada das redes cnn_lstm / cnn2d).
 
 Ver `roteiro.md`. A tabela de `lagged_table` já alinha, em cada linha `t`:
 clima em `t-45`, histórico de casos em `t-30` e o alvo `Qtde_Casos[t]`. Aqui

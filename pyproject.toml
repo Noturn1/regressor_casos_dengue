@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "dengue-tl"
 version = "0.1.0"
-description = "Estimativa de casos de dengue com EfficientNet (transfer learning)"
+description = "Estimativa de casos de dengue com redes convolucionais/recorrentes (CNN-LSTM, CNN2D)"
 requires-python = ">=3.11"
 dependencies = [
     "numpy",
@@ -17,7 +17,7 @@ dev = ["pytest"]
 # Relatório: tabelas e gráficos (`python -m dengue_tl.report`).
 report = ["matplotlib"]
 # Deep learning: instalado só quando for treinar (evita baixar TensorFlow para rodar o pipeline de dados).
-dl = ["tensorflow", "pyts", "pillow", "scipy"]
+dl = ["tensorflow"]
 # Busca de hiperparâmetros (`python -m dengue_tl.tune_runner`); usar junto com `dl`.
 opt = ["optuna"]
 
