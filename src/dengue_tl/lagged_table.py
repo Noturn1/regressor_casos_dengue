@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from dengue_tl.series_loader import SeriesGapError, load, repara_valores_numericos
@@ -29,6 +30,16 @@ class LaggedTableConfig:
     lag_clima: int = 45
     lag_historico: int = 30
     date_column: str = "Data"
+    # Sazonalidade: adiciona `sin_ano`/`cos_ano` do dia t (o dia-alvo) como
+    # features. NAO e vazamento — o calendario e conhecido de antemao para
+    # qualquer data (feature exogena de futuro conhecido), diferente das
+    # variaveis de caso/clima, que precisam de lag. Desligado por padrao aqui
+    # (mantem o contrato basico da tabela); o experimento liga via TreinoConfig.
+    sazonalidade: bool = False
+    # Data do primeiro registro, usada so quando a serie e dateless (sem coluna
+    # 'Data'): o dataset completo comeca em 2007-01-01. Com indice datetime, as
+    # datas reais mandam e este campo e ignorado.
+    data_inicial: str = "2007-01-01"
 
 
 def _valida_contiguidade_diaria(indice: pd.Index) -> None:
@@ -73,6 +84,26 @@ def _normaliza_entrada(dados, date_column: str) -> pd.DataFrame:
     )
 
 
+def _features_sazonais(base: pd.DataFrame, data_inicial: str) -> pd.DataFrame:
+    """Codifica o dia-do-ano de cada linha como par seno/cosseno.
+
+    O par (periodo 365.25) evita a descontinuidade 31/dez -> 1/jan que uma
+    codificacao linear teria. Usa o indice datetime quando existe; caso
+    contrario, reconstroi as datas posicionalmente a partir de `data_inicial`
+    (a serie completa e diaria e contigua).
+    """
+    if isinstance(base.index, pd.DatetimeIndex):
+        datas = base.index
+    else:
+        datas = pd.date_range(data_inicial, periods=len(base), freq="D")
+
+    angulo = 2.0 * np.pi * datas.dayofyear.to_numpy(dtype=float) / 365.25
+    return pd.DataFrame(
+        {"sin_ano": np.sin(angulo), "cos_ano": np.cos(angulo)},
+        index=base.index,
+    )
+
+
 def build_lagged_table(
     dados,
     config: LaggedTableConfig = LaggedTableConfig(),
@@ -113,7 +144,15 @@ def build_lagged_table(
     )
     alvo = base[[VARIAVEL_ALVO]]
 
-    tabela = pd.concat([clima, historico, alvo], axis=1).dropna().copy()
+    # As colunas sazonais entram entre as features e o alvo: sem lag (calendario
+    # do proprio dia) e sem NaN, entao o dropna abaixo so corta o aquecimento
+    # dos lags, preservando o seno/cosseno correto de cada linha remanescente.
+    partes = [clima, historico]
+    if config.sazonalidade:
+        partes.append(_features_sazonais(base, config.data_inicial))
+    partes.append(alvo)
+
+    tabela = pd.concat(partes, axis=1).dropna().copy()
     tabela.index.name = base.index.name
     return tabela
 

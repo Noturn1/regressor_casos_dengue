@@ -106,6 +106,17 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--lag-clima", type=int, default=45)
     parser.add_argument("--lag-historico", type=int, default=30)
     parser.add_argument(
+        "--sazonalidade",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Adiciona sin/cos do dia-do-ano como features (--no-sazonalidade desativa).",
+    )
+    parser.add_argument(
+        "--data-inicial",
+        default="2007-01-01",
+        help="Data do 1o registro (serie dateless), base do calendario sazonal.",
+    )
+    parser.add_argument(
         "--output-json",
         default="resultados_otimizacao.json",
         help="Arquivo JSON de saida com trials, melhor config e avaliacao final.",
@@ -128,6 +139,8 @@ def main() -> None:
         arquitetura=args.arquitetura,
         lag_clima=args.lag_clima,
         lag_historico=args.lag_historico,
+        sazonalidade=args.sazonalidade,
+        data_inicial=args.data_inicial,
         raio=args.raio,
         epocas_fase1=args.epocas_fase1,
         epocas_fase2=args.epocas_fase2,
