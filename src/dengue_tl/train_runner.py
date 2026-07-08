@@ -4,9 +4,12 @@ Amarra as etapas do pipeline atual:
 1) constroi (ou carrega do cache) a tabela lagged: clima em t-45, historico em t-30, alvo em t
 2) janela as features em matrizes 9x4 (dia central = alvo)
 3) split temporal treino/validacao/teste (sem embaralhar)
-4) escala as features por-coluna (fit so no treino) e codifica cada 9x4 em imagem
-5) treina EfficientNet em 2 fases
-6) avalia modelo e baselines (media do treino / historico t-30) na escala original
+4) escala as features por-coluna (fit so no treino) e adapta a entrada a arquitetura
+5) alvo: suaviza (media movel 7d centrada) e transforma em log-razao sobre o
+   historico (ver TransformadorAlvo) — ou log1p puro com --alvo nivel
+6) treina a arquitetura escolhida (dengue_tl.models)
+7) avalia modelo e baselines (media do treino / historico t-30) na escala
+   original bruta e contra o alvo suavizado
 """
 
 from __future__ import annotations
@@ -55,6 +58,15 @@ class TreinoConfig:
     unidades_lstm: int = 32
     dense_unidades: int = 64
     dropout: float = 0.3
+    # Formulacao do alvo. "razao": log1p(casos) - log1p(historico) — o modelo
+    # preve o crescimento em ~30 dias, invariante a escala do surto; a
+    # persistencia vira exatamente "prever 0". "nivel": log1p(casos) puro
+    # (formulacao antiga; nao transfere entre regimes epidemicos).
+    alvo: str = "razao"
+    # Media movel centrada aplicada ao alvo (e ao historico usado na razao)
+    # antes do treino/avaliacao: o serrilhado semanal de notificacao e ruido
+    # de registro, nao sinal. 0 ou 1 desativam.
+    suavizacao_alvo: int = 7
     seed: int = 42
     split: SplitConfig = field(default_factory=SplitConfig)
 
@@ -158,15 +170,62 @@ def _set_semente(seed: int) -> None:
     np.random.seed(seed)
 
 
-def preve_casos(model, x, scaler_y: Scaler, teto_log: float) -> np.ndarray:
-    """Prediz em log1p, limita a [0, teto_log] e inverte para a escala de casos.
+def _media_movel_centrada(v: np.ndarray, janela: int) -> np.ndarray:
+    """Media movel centrada sobre uma serie diaria consecutiva (bordas: parcial).
 
-    Sem o clip, uma extrapolacao da rede em log explode no expm1 (log 20 ->
-    ~5e8 casos). O teto e o maior alvo visto no treino: alem dele o modelo nao
-    tem informacao; o piso 0 descarta contagens negativas.
+    As janelas 9x4 deslizam de 1 em 1 dia, entao `y` e `historico` sao series
+    diarias consecutivas — o rolling e valido.
     """
-    y_pred_log = model.predict(x, verbose=0).reshape(-1)
-    return scaler_y.inverse_target(np.clip(y_pred_log, 0.0, teto_log))
+    if janela <= 1:
+        return np.asarray(v, dtype=float)
+    import pandas as pd
+
+    return (
+        pd.Series(np.asarray(v, dtype=float))
+        .rolling(janela, center=True, min_periods=1)
+        .mean()
+        .to_numpy()
+    )
+
+
+@dataclass(frozen=True)
+class TransformadorAlvo:
+    """Transforma casos <-> espaco do modelo, conforme a formulacao do alvo.
+
+    - `alvo="razao"`: o modelo aprende `log1p(casos) - log1p(historico)` (log da
+      razao de crescimento em ~30 dias). Invariante a escala: um surto 30->90 no
+      treino ensina o mesmo padrao que 200->600 no teste. Prever 0 == baseline
+      de persistencia, entao qualquer aprendizado e ganho sobre o baseline.
+    - `alvo="nivel"`: `log1p(casos)` puro (formulacao antiga).
+
+    `teto_log` e SO anti-explosao numerica (uma extrapolacao em log explode no
+    expm1: log 20 -> ~5e8 casos). E generoso de proposito — nao e um teto
+    epidemiologico: limitar ao maximo do treino tornaria impossivel prever
+    surtos maiores que os ja vistos.
+    """
+
+    alvo: str
+    teto_log: float
+
+    def transforma(self, casos: np.ndarray, historico: np.ndarray) -> np.ndarray:
+        y_log = np.log1p(np.asarray(casos, dtype=float))
+        if self.alvo == "razao":
+            return y_log - np.log1p(np.asarray(historico, dtype=float))
+        return y_log
+
+    def inverte(self, y_modelo: np.ndarray, historico: np.ndarray) -> np.ndarray:
+        log_casos = np.asarray(y_modelo, dtype=float)
+        if self.alvo == "razao":
+            log_casos = log_casos + np.log1p(np.asarray(historico, dtype=float))
+        return np.expm1(np.clip(log_casos, 0.0, self.teto_log))
+
+
+def preve_casos(
+    model, x, transformador: TransformadorAlvo, historico: np.ndarray
+) -> np.ndarray:
+    """Prediz no espaco do modelo e inverte para a escala de casos (com clip)."""
+    y_pred = model.predict(x, verbose=0).reshape(-1)
+    return transformador.inverte(y_pred, historico)
 
 
 @dataclass(frozen=True)
@@ -181,12 +240,15 @@ class DadosPreparados:
     x_treino: np.ndarray
     x_val: np.ndarray
     x_teste: np.ndarray
-    y_treino: np.ndarray  # alvo em log1p
-    y_val: np.ndarray  # alvo em log1p
+    y_treino: np.ndarray  # alvo no espaco do modelo (ver TransformadorAlvo)
+    y_val: np.ndarray  # alvo no espaco do modelo
     y_treino_raw: np.ndarray
     y_val_raw: np.ndarray
     y_teste_raw: np.ndarray
-    scaler_y: Scaler
+    y_teste_suave: np.ndarray  # alvo do teste suavizado (== raw se suavizacao <= 1)
+    hist_val: np.ndarray  # historico suavizado do dia central (p/ inverter a razao)
+    hist_teste: np.ndarray
+    transformador: TransformadorAlvo
     baseline_media_pred: np.ndarray
     baseline_historico_pred: np.ndarray
     split: tuple[slice, slice, slice]
@@ -232,10 +294,21 @@ def prepara_dados(config: TreinoConfig) -> DadosPreparados:
     scaler_x = Scaler().fit(X[treino_sl])
     X_escalado = scaler_x.transform(X)
 
-    # Alvo do modelo em log1p.
-    scaler_y = Scaler()
-    y_treino = scaler_y.transform_target(y[treino_sl])
-    y_val = scaler_y.transform_target(y[val_sl])
+    # Alvo do modelo: casos e historico do dia central suavizados (media movel
+    # centrada, ruido semanal de notificacao), depois log-razao ou log1p.
+    # A suavizacao do historico usa valores com >= lag-3 dias de idade: sem
+    # vazamento do presente.
+    hist_raw = X[:, config.raio, idx_historico].astype(float)
+    y_suave = _media_movel_centrada(y.astype(float), config.suavizacao_alvo)
+    hist_suave = _media_movel_centrada(hist_raw, config.suavizacao_alvo)
+
+    # Teto SO anti-explosao (~3 ordens de grandeza acima do maior surto do
+    # treino); ver TransformadorAlvo.
+    teto_log = float(np.log1p(1000.0 * max(1.0, y_treino_raw.max())))
+    transformador = TransformadorAlvo(alvo=config.alvo, teto_log=teto_log)
+
+    y_treino = transformador.transforma(y_suave[treino_sl], hist_suave[treino_sl])
+    y_val = transformador.transforma(y_suave[val_sl], hist_suave[val_sl])
 
     # Import lazy: permite testar a logica (split/baselines) sem dependencias de DL.
     # Cada arquitetura mora em seu arquivo (dengue_tl/models/) e implementa a
@@ -254,7 +327,10 @@ def prepara_dados(config: TreinoConfig) -> DadosPreparados:
         y_treino_raw=y_treino_raw,
         y_val_raw=y_val_raw,
         y_teste_raw=y_teste_raw,
-        scaler_y=scaler_y,
+        y_teste_suave=y_suave[teste_sl],
+        hist_val=hist_suave[val_sl],
+        hist_teste=hist_suave[teste_sl],
+        transformador=transformador,
         baseline_media_pred=baseline_media_pred,
         baseline_historico_pred=baseline_historico_pred,
         split=(treino_sl, val_sl, teste_sl),
@@ -278,11 +354,9 @@ def treina_e_avalia(config: TreinoConfig) -> dict[str, object]:
         dados.x_treino, dados.y_treino, dados.x_val, dados.y_val, config
     )
 
-    y_pred = preve_casos(
-        model, dados.x_teste, dados.scaler_y, teto_log=float(dados.y_treino.max())
-    )
+    y_pred = preve_casos(model, dados.x_teste, dados.transformador, dados.hist_teste)
 
-    return {
+    resultado: dict[str, object] = {
         "config": asdict(config),
         "split": {
             "treino": [treino_sl.start, treino_sl.stop],
@@ -302,6 +376,23 @@ def treina_e_avalia(config: TreinoConfig) -> dict[str, object]:
             "y_pred_baseline_historico": [float(v) for v in baseline_historico_pred],
         },
     }
+
+    # Metricas tambem contra o alvo suavizado: o serrilhado semanal do dado
+    # bruto e ruido de notificacao irredutivel para features com lag >= 30d.
+    if config.suavizacao_alvo > 1:
+        y_teste_suave = dados.y_teste_suave
+        resultado["metricas_alvo_suavizado"] = {
+            "modelo": calcula_metricas(y_teste_suave, y_pred),
+            "baseline_media": calcula_metricas(y_teste_suave, baseline_media_pred),
+            "baseline_historico": calcula_metricas(
+                y_teste_suave, baseline_historico_pred
+            ),
+        }
+        resultado["predicoes_teste"]["y_true_suave"] = [
+            float(v) for v in y_teste_suave
+        ]
+
+    return resultado
 
 
 def _parse_args() -> argparse.Namespace:
@@ -338,6 +429,18 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--unidades-lstm", type=int, default=32)
     parser.add_argument("--dense-unidades", type=int, default=64)
     parser.add_argument("--dropout", type=float, default=0.3)
+    parser.add_argument(
+        "--alvo",
+        default="razao",
+        choices=("razao", "nivel"),
+        help="Formulacao do alvo: log-razao sobre o historico (padrao) ou log1p puro.",
+    )
+    parser.add_argument(
+        "--suavizacao-alvo",
+        type=int,
+        default=7,
+        help="Janela da media movel centrada do alvo (0/1 desativa).",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--treino-fracao", type=float, default=0.7)
     parser.add_argument("--validacao-fracao", type=float, default=0.15)
@@ -364,6 +467,8 @@ def main() -> None:
         unidades_lstm=args.unidades_lstm,
         dense_unidades=args.dense_unidades,
         dropout=args.dropout,
+        alvo=args.alvo,
+        suavizacao_alvo=args.suavizacao_alvo,
         seed=args.seed,
         split=SplitConfig(
             treino_fracao=args.treino_fracao,

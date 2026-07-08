@@ -180,6 +180,18 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--unidades-lstm", type=int, default=32)
     parser.add_argument("--dense-unidades", type=int, default=64)
     parser.add_argument("--dropout", type=float, default=0.3)
+    parser.add_argument(
+        "--alvo",
+        default="razao",
+        choices=("razao", "nivel"),
+        help="Formulacao do alvo: log-razao sobre o historico (padrao) ou log1p puro.",
+    )
+    parser.add_argument(
+        "--suavizacao-alvo",
+        type=int,
+        default=7,
+        help="Janela da media movel centrada do alvo (0/1 desativa).",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--treino-fracao", type=float, default=0.7)
     parser.add_argument("--validacao-fracao", type=float, default=0.15)
@@ -216,6 +228,8 @@ def main() -> None:
         unidades_lstm=args.unidades_lstm,
         dense_unidades=args.dense_unidades,
         dropout=args.dropout,
+        alvo=args.alvo,
+        suavizacao_alvo=args.suavizacao_alvo,
         seed=args.seed,
         split=SplitConfig(
             treino_fracao=args.treino_fracao,
