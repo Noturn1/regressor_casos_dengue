@@ -6,8 +6,8 @@ LSTM já espera `(timesteps, features)`, que é exatamente o formato do janelado
 As `Conv1D` extraem padrões locais ao longo dos 9 dias e o `LSTM` modela a
 dependência temporal; a cabeça `Dense(1)` faz a regressão.
 
-Rede minúscula (poucos milhares de parâmetros): treina em segundos na CPU, ao
-contrário do backbone de visão. Requer o extra `dl` (tensorflow).
+Rede minúscula (poucos milhares de parâmetros): treina em segundos na CPU.
+Requer o extra `dl` (tensorflow).
 """
 
 from __future__ import annotations
@@ -38,11 +38,13 @@ def prepara_entrada(X_escalado: np.ndarray) -> np.ndarray:
     return np.asarray(X_escalado, dtype="float32")
 
 
-def treina(x_treino, y_treino, x_val, y_val, config):
+def treina(x_treino, y_treino, x_val, y_val, config, sample_weight=None):
     """Treino em fase única (a rede é pequena; sem congelar/descongelar).
 
-    Usa `epocas_fase1 + epocas_fase2` como orçamento total de épocas e o
-    `learning_rate_fase1` do config; `EarlyStopping` restaura os melhores pesos.
+    Usa `epocas` como orçamento total e o `learning_rate` do config;
+    `EarlyStopping` restaura os melhores pesos.
+    `sample_weight` (opcional) pondera cada dia de treino na loss — ver
+    `train_runner.pesos_por_nivel` (peso de pico). A validação fica sem peso.
     """
     keras.utils.set_random_seed(config.seed)
 
@@ -53,7 +55,7 @@ def treina(x_treino, y_treino, x_val, y_val, config):
         dropout=config.dropout,
     )
     model.compile(
-        optimizer=keras.optimizers.Adam(learning_rate=config.learning_rate_fase1),
+        optimizer=keras.optimizers.Adam(learning_rate=config.learning_rate),
         loss="mse",
         metrics=["mae"],
     )
@@ -70,8 +72,9 @@ def treina(x_treino, y_treino, x_val, y_val, config):
         x_treino,
         y_treino,
         validation_data=(x_val, y_val),
-        epochs=config.epocas_fase1 + config.epocas_fase2,
+        epochs=config.epocas,
         batch_size=config.batch_size,
+        sample_weight=sample_weight,
         verbose=0,
         callbacks=callbacks,
     )
@@ -88,8 +91,11 @@ def espaco_busca(trial) -> dict:
         "filtros": trial.suggest_categorical("filtros", [16, 32, 64, 128]),
         "unidades_lstm": trial.suggest_categorical("unidades_lstm", [16, 32, 64, 128]),
         "dropout": trial.suggest_float("dropout", 0.0, 0.5),
-        "learning_rate_fase1": trial.suggest_float(
-            "learning_rate_fase1", 1e-4, 1e-2, log=True
+        "learning_rate": trial.suggest_float(
+            "learning_rate", 1e-4, 1e-2, log=True
         ),
         "batch_size": trial.suggest_categorical("batch_size", [16, 32, 64]),
+        # Peso de pico: 0 (sem peso) até forte. A busca decide se ponderar os
+        # dias de alto numero de casos ajuda — ver train_runner.pesos_por_nivel.
+        "peso_pico": trial.suggest_float("peso_pico", 0.0, 8.0),
     }

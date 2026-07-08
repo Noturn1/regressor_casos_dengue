@@ -2,7 +2,7 @@
 
 Centraliza as tarefas do dia-a-dia sem exigir comandos verbosos:
 
-1. treinar e avaliar um modelo (cnn_lstm | cnn2d | efficientnet);
+1. treinar e avaliar um modelo (cnn_lstm | cnn2d);
 2. buscar hiperparametros com Optuna (tune_runner);
 3. gerar tabelas/graficos do relatorio (dengue_tl.report);
 4. ver o resumo de um resultado JSON ja salvo;
@@ -27,9 +27,8 @@ from dengue_tl.train_runner import SplitConfig, TreinoConfig
 
 CSV_DIR = Path("data")
 
-# Trials default por arquitetura: a EfficientNet e ~2 ordens de grandeza mais
-# lenta por trial que a CNN-LSTM, entao o orcamento default e menor.
-TRIALS_DEFAULT = {"cnn_lstm": 50, "cnn2d": 50, "efficientnet": 15}
+# Trials default por arquitetura (redes pequenas: treinam em segundos na CPU).
+TRIALS_DEFAULT = {"cnn_lstm": 50, "cnn2d": 50}
 
 
 # ---------------------------------------------------------------- prompts ----
@@ -113,8 +112,7 @@ def _config_interativa(arquitetura: str) -> TreinoConfig:
     if not _confirma("Usar configuracao padrao (epocas, batch, lr, lags)?"):
         config = replace(
             config,
-            epocas_fase1=_pergunta_int("Epocas fase 1", config.epocas_fase1),
-            epocas_fase2=_pergunta_int("Epocas fase 2", config.epocas_fase2),
+            epocas=_pergunta_int("Epocas", config.epocas),
             batch_size=_pergunta_int("Batch size", config.batch_size),
             raio=_pergunta_int("Raio da janela", config.raio),
             lag_clima=_pergunta_int("Lag do clima (dias)", config.lag_clima),
@@ -165,7 +163,7 @@ def acao_treinar() -> None:
 
     from dengue_tl.experiment import formata_resumo, roda_experimento
 
-    print("\nTreinando... (a EfficientNet pode levar varios minutos)")
+    print("\nTreinando...")
     resultado = roda_experimento(config)
     print(formata_resumo(resultado["resumo"]))
     output.write_text(
@@ -273,7 +271,7 @@ ACOES = [
 
 def main() -> None:
     print("=" * 56)
-    print("Dengue 9x4 — estimativa de casos (CNN-LSTM / EfficientNet)")
+    print("Dengue 9x4 — estimativa de casos (CNN-LSTM / CNN2D)")
     print("=" * 56)
     while True:
         print("\nO que voce quer fazer?")

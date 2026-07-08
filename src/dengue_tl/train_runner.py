@@ -48,12 +48,9 @@ class TreinoConfig:
     lag_historico: int = 30
     raio: int = 4  # janela de 2*raio+1 == 9 linhas
     batch_size: int = 32
-    epocas_fase1: int = 20
-    epocas_fase2: int = 10
+    epocas: int = 30
     paciencia_early_stopping: int = 5
-    learning_rate_fase1: float = 1e-3
-    learning_rate_fase2: float = 1e-4
-    n_camadas_finais: int = 20
+    learning_rate: float = 1e-3
     filtros: int = 32
     unidades_lstm: int = 32
     dense_unidades: int = 64
@@ -73,6 +70,11 @@ class TreinoConfig:
     # vazamento.
     sazonalidade: bool = True
     data_inicial: str = "2007-01-01"
+    # Peso de pico: cada dia de treino recebe peso 1 + peso_pico*(nivel/nivel_max)
+    # na loss, priorizando acertar a AMPLITUDE dos dias de alto numero de casos
+    # (que dominam MAE/RMSE na escala original). 0 desativa (peso uniforme).
+    # Nao mexe na formulacao log-razao — so realoca a atencao do otimizador.
+    peso_pico: float = 0.0
     seed: int = 42
     split: SplitConfig = field(default_factory=SplitConfig)
 
@@ -147,6 +149,22 @@ def split_temporal(
         slice(fim_treino, fim_validacao),
         slice(fim_validacao, n_amostras),
     )
+
+
+def pesos_por_nivel(nivel: np.ndarray, peso_pico: float) -> np.ndarray | None:
+    """Peso de amostra crescente no nivel de casos do dia (para a loss de treino).
+
+    `w = 1 + peso_pico * (nivel / nivel_max)`, com `nivel_max` do proprio treino:
+    o dia mais alto do treino pesa `1 + peso_pico`, dias zero pesam 1. Retorna
+    `None` quando `peso_pico <= 0` (peso uniforme, comportamento identico ao
+    `fit` sem `sample_weight`).
+    """
+    if peso_pico <= 0:
+        return None
+    nivel = np.asarray(nivel, dtype=float)
+    ref = max(1.0, float(nivel.max()))
+    frac = np.clip(nivel, 0.0, None) / ref
+    return (1.0 + peso_pico * frac).astype("float32")
 
 
 def baseline_media(y_treino: np.ndarray, tamanho: int) -> np.ndarray:
@@ -251,8 +269,7 @@ class DadosPreparados:
     """Dados do pipeline ja janelados, divididos, escalados e codificados.
 
     Materializa tudo que vem ANTES do treino, para que o `tune_runner` prepare
-    os dados uma unica vez e rode varios trials de treino sobre eles (a
-    codificacao em imagem da EfficientNet e cara para repetir por trial).
+    os dados uma unica vez e rode varios trials de treino sobre eles.
     """
 
     x_treino: np.ndarray
@@ -269,6 +286,10 @@ class DadosPreparados:
     transformador: TransformadorAlvo
     baseline_media_pred: np.ndarray
     baseline_historico_pred: np.ndarray
+    # Nivel de casos (suavizado) do dia central de treino; o `sample_weight` do
+    # peso de pico e derivado dele NO MOMENTO DO TREINO (via pesos_por_nivel),
+    # para que `peso_pico` possa variar por trial na busca de hiperparametros.
+    nivel_treino: np.ndarray
     split: tuple[slice, slice, slice]
 
 
@@ -328,6 +349,10 @@ def prepara_dados(config: TreinoConfig) -> DadosPreparados:
     y_treino = transformador.transforma(y_suave[treino_sl], hist_suave[treino_sl])
     y_val = transformador.transforma(y_suave[val_sl], hist_suave[val_sl])
 
+    # Nivel de casos do dia central de treino: base do peso de pico, aplicado
+    # no treino (permite `peso_pico` variar por trial na busca).
+    nivel_treino = y_suave[treino_sl].astype(float)
+
     # Import lazy: permite testar a logica (split/baselines) sem dependencias de DL.
     # Cada arquitetura mora em seu arquivo (dengue_tl/models/) e implementa a
     # mesma interface: prepara_entrada + treina + espaco_busca. Ver dengue_tl.models.
@@ -351,12 +376,13 @@ def prepara_dados(config: TreinoConfig) -> DadosPreparados:
         transformador=transformador,
         baseline_media_pred=baseline_media_pred,
         baseline_historico_pred=baseline_historico_pred,
+        nivel_treino=nivel_treino,
         split=(treino_sl, val_sl, teste_sl),
     )
 
 
 def treina_e_avalia(config: TreinoConfig) -> dict[str, object]:
-    """Executa treino em 2 fases e avalia modelo + baselines."""
+    """Treina a arquitetura escolhida e avalia modelo + baselines."""
     _set_semente(config.seed)
 
     dados = prepara_dados(config)
@@ -369,7 +395,12 @@ def treina_e_avalia(config: TreinoConfig) -> dict[str, object]:
 
     modulo = seleciona_arquitetura(config.arquitetura)
     model, historico = modulo.treina(
-        dados.x_treino, dados.y_treino, dados.x_val, dados.y_val, config
+        dados.x_treino,
+        dados.y_treino,
+        dados.x_val,
+        dados.y_val,
+        config,
+        sample_weight=pesos_por_nivel(dados.nivel_treino, config.peso_pico),
     )
 
     y_pred = preve_casos(model, dados.x_teste, dados.transformador, dados.hist_teste)
@@ -421,7 +452,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--arquitetura",
         default="cnn_lstm",
-        help="Arquitetura do modelo (cnn_lstm | cnn2d | efficientnet).",
+        help="Arquitetura do modelo (cnn_lstm | cnn2d).",
     )
     parser.add_argument(
         "--cache-path",
@@ -437,12 +468,9 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--raio", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--epocas-fase1", type=int, default=20)
-    parser.add_argument("--epocas-fase2", type=int, default=10)
+    parser.add_argument("--epocas", type=int, default=30)
     parser.add_argument("--paciencia", type=int, default=5)
-    parser.add_argument("--lr-fase1", type=float, default=1e-3)
-    parser.add_argument("--lr-fase2", type=float, default=1e-4)
-    parser.add_argument("--n-camadas-finais", type=int, default=20)
+    parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--filtros", type=int, default=32)
     parser.add_argument("--unidades-lstm", type=int, default=32)
     parser.add_argument("--dense-unidades", type=int, default=64)
@@ -470,6 +498,12 @@ def _parse_args() -> argparse.Namespace:
         default="2007-01-01",
         help="Data do 1o registro (serie dateless), base do calendario sazonal.",
     )
+    parser.add_argument(
+        "--peso-pico",
+        type=float,
+        default=0.0,
+        help="Peso extra dos dias de alto numero de casos na loss (0 desativa).",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--treino-fracao", type=float, default=0.7)
     parser.add_argument("--validacao-fracao", type=float, default=0.15)
@@ -486,12 +520,9 @@ def main() -> None:
         lag_historico=args.lag_historico,
         raio=args.raio,
         batch_size=args.batch_size,
-        epocas_fase1=args.epocas_fase1,
-        epocas_fase2=args.epocas_fase2,
+        epocas=args.epocas,
         paciencia_early_stopping=args.paciencia,
-        learning_rate_fase1=args.lr_fase1,
-        learning_rate_fase2=args.lr_fase2,
-        n_camadas_finais=args.n_camadas_finais,
+        learning_rate=args.lr,
         filtros=args.filtros,
         unidades_lstm=args.unidades_lstm,
         dense_unidades=args.dense_unidades,
@@ -500,6 +531,7 @@ def main() -> None:
         suavizacao_alvo=args.suavizacao_alvo,
         sazonalidade=args.sazonalidade,
         data_inicial=args.data_inicial,
+        peso_pico=args.peso_pico,
         seed=args.seed,
         split=SplitConfig(
             treino_fracao=args.treino_fracao,

@@ -1,9 +1,10 @@
-# Contexto — Estimativa de casos de dengue com CNN-LSTM / EfficientNet
+# Contexto — Estimativa de casos de dengue com CNN-LSTM / CNN2D
 
-Trabalho de disciplina: estimar o número de casos de dengue de um dia a partir de uma
-imagem que codifica dados estruturados ao redor desse dia, usando **transfer learning**
-com **EfficientNet-B0**. Aplicado a Cascavel-PR. Reaproveita parte do código de uma
-Iniciação Científica, mas com escopo próprio (ver `roteiro.md`).
+Trabalho de disciplina: estimar o número de casos de dengue de um dia a partir dos
+dados estruturados ao redor desse dia (uma janela 9×4), com redes convolucionais/
+recorrentes pequenas. Aplicado a Cascavel-PR. Reaproveita parte do código de uma
+Iniciação Científica, mas com escopo próprio (ver `roteiro.md`). As arquiteturas
+avaliadas são **CNN-LSTM** e **CNN2D** (e um MLP a ser adicionado).
 
 ## Vocabulário
 
@@ -18,22 +19,13 @@ as features já defasadas e o alvo `Qtde_Casos[t]`. As 4 features são: `Precipi
 de 1 em 1 dia. Empilhada, vira uma **matriz 9×4** (9 dias × 4 features). O alvo é o
 `Caso` do dia central (nowcasting / imputação).
 
-**Representação**: forma de codificar a Janela em imagem. Fixada na **matriz 9×4**
-empilhada (`encode_matrix`) — os dados são estruturados/multivariados, então a geometria
-9×4 é a forma natural do bloco e preserva as 4 features. É uma escolha de projeto, não um
-eixo de experimento. (O codificador GASF univariado da IC original ainda existe em
-`encoder.py` como alternativa legada, mas não é a abordagem atual.)
+**Representação**: a Janela entra na rede como a **matriz 9×4** empilhada, sem
+codificação em imagem — os dados são estruturados/multivariados, então a geometria
+9×4 é a forma natural do bloco e preserva as 4 features. Cada arquitetura só adapta
+o formato em `prepara_entrada` (CNN-LSTM: `(9, 4)` direto; CNN2D: transposta para
+`(4, 9, 1)`).
 
-**Codificador**: `encode_matrix` transforma a matriz 9×4 na imagem 100×100×3. O resize
-9×4 → 100×100 **não é feature engineering**: é um adaptador de interface. A EfficientNet-B0
-reduz a resolução espacial por 32× (5 estágios stride-2), então uma entrada 9×4 colapsaria
-antes do fim da rede. 100×100 sobrevive ao downsampling (→ ~3×3) e é mais barato que os
-224×224 nativos. A interpolação só espalha os 36 valores num canvas maior; não cria
-informação.
-
-**Arquitetura padrão**: CNN-LSTM — duas `Conv1D` + `LSTM` sobre a janela `(9, 4)` diretamente, sem codificação em imagem. Rede minúscula (poucos milhares de parâmetros), treina em segundos na CPU.
-
-**Arquitetura alternativa**: EfficientNet-B0 pré-treinada (ImageNet) — requer codificar a janela 9×4 em imagem 100×100×3 via `encode_matrix`. Treino em 2 fases (backbone congelado → fine-tune). Seleção via `--arquitetura` em `experiment.py`.
+**Arquitetura padrão**: CNN-LSTM — duas `Conv1D` + `LSTM` sobre a janela `(9, 4)` diretamente. Rede minúscula (poucos milhares de parâmetros), treina em segundos na CPU. Seleção via `--arquitetura` em `experiment.py`.
 
 **Arquitetura cnn2d** (recomendação do professor): CNN 2D pura sobre a janela transposta
 `(4, 9, 1)` — Conv2D(32)→Conv2D(64), kernels 2×2 `same`, Flatten, Dense(64), Dense(1).
@@ -75,14 +67,28 @@ de forma consistente (o modelo passa a enxergar a fase do ano); converter isso e
 ganho de MAE exige **re-tunar os hiperparâmetros** (os antigos foram buscados
 sobre 4 features).
 
+**Peso de pico** (`peso_pico`, default `0.0` = desligado): o erro do modelo se
+concentra nos poucos dias de pico epidêmico (que dominam MAE/RMSE na escala de
+casos), enquanto a fora-de-temporada já é quase perfeita. `peso_pico` pondera
+cada dia de treino na loss por `1 + peso_pico·(nível/nível_max)` (nível =
+casos suavizados do dia central de treino), fazendo o otimizador priorizar a
+**amplitude** do pico. Não mexe na formulação log-razão — só realoca a atenção.
+A validação fica sem peso (não distorce EarlyStopping nem o objetivo do Optuna).
+Entra no `espaco_busca` das duas arquiteturas (faixa 0–8), então o Optuna testa
+diferentes intensidades por trial: o `sample_weight` é recalculado a cada treino
+a partir do `nivel_treino` guardado em `DadosPreparados` (barato), em vez de fixo
+na preparação. Também dá para forçar um valor com `--peso-pico`. Ver
+`train_runner.pesos_por_nivel`. **Efeito observado** (cnn2d, re-tunado com
+sazonalidade): MAE de teste 29→22, RMSE 77→66, predição máxima ~240→409 (destrava
+a amplitude do pico).
+
 ## Fatos dos dados
 
 - Série diária, contígua, sem faltantes. A base completa tem coluna de data; a amostra
   (`data/AmostraDados.csv`) **não** tem — em desenvolvimento, usar índice sequencial.
 - Variáveis originais: `Precipitacao`, `Temp_media`, `Umidade_rel`, `Qtde_Casos`. Este
   trabalho usa **as 4** (multivariado): as 3 climáticas e o histórico de casos entram como
-  features defasadas na tabela lagged; `Qtde_Casos` do dia atual é o alvo. A imagem é
-  replicada nos 3 canais RGB (a EfficientNet espera 3 canais).
+  features defasadas na tabela lagged; `Qtde_Casos` do dia atual é o alvo.
 
 ## Ponto crítico — vazamento do dia central
 

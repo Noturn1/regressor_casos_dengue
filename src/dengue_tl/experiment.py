@@ -39,8 +39,8 @@ def _tamanho(par: list[int]) -> int:
 def _melhor_epoca_validacao(historico: dict) -> dict:
     """Melhor época pelo menor `val_loss`, varrendo todas as fases do histórico.
 
-    Agnóstico ao modelo: funciona tanto para treino em fase única (`{"treino": ...}`,
-    ex. CNN-LSTM) quanto em 2 fases (`{"fase1": ..., "fase2": ...}`, ex. EfficientNet).
+    Agnóstico ao modelo: varre todas as fases do histórico, seja ele de fase
+    única (`{"treino": ...}`) ou de múltiplas fases (`{"fase1": ..., ...}`).
     """
     melhor = {"fase": None, "epoca": None, "val_loss": float("inf")}
     for fase, curvas in historico.items():
@@ -163,19 +163,16 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--arquitetura",
         default="cnn_lstm",
-        help="Arquitetura do modelo (cnn_lstm | cnn2d | efficientnet).",
+        help="Arquitetura do modelo (cnn_lstm | cnn2d).",
     )
     parser.add_argument("--cache-path", default="cache/tabela_lagged.csv")
     parser.add_argument("--lag-clima", type=int, default=45)
     parser.add_argument("--lag-historico", type=int, default=30)
     parser.add_argument("--raio", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--epocas-fase1", type=int, default=20)
-    parser.add_argument("--epocas-fase2", type=int, default=10)
+    parser.add_argument("--epocas", type=int, default=30)
     parser.add_argument("--paciencia", type=int, default=5)
-    parser.add_argument("--lr-fase1", type=float, default=1e-3)
-    parser.add_argument("--lr-fase2", type=float, default=1e-4)
-    parser.add_argument("--n-camadas-finais", type=int, default=20)
+    parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--filtros", type=int, default=32)
     parser.add_argument("--unidades-lstm", type=int, default=32)
     parser.add_argument("--dense-unidades", type=int, default=64)
@@ -203,6 +200,12 @@ def _parse_args() -> argparse.Namespace:
         default="2007-01-01",
         help="Data do 1o registro (serie dateless), base do calendario sazonal.",
     )
+    parser.add_argument(
+        "--peso-pico",
+        type=float,
+        default=0.0,
+        help="Peso extra dos dias de alto numero de casos na loss (0 desativa).",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--treino-fracao", type=float, default=0.7)
     parser.add_argument("--validacao-fracao", type=float, default=0.15)
@@ -229,12 +232,9 @@ def main() -> None:
         lag_historico=args.lag_historico,
         raio=args.raio,
         batch_size=args.batch_size,
-        epocas_fase1=args.epocas_fase1,
-        epocas_fase2=args.epocas_fase2,
+        epocas=args.epocas,
         paciencia_early_stopping=args.paciencia,
-        learning_rate_fase1=args.lr_fase1,
-        learning_rate_fase2=args.lr_fase2,
-        n_camadas_finais=args.n_camadas_finais,
+        learning_rate=args.lr,
         filtros=args.filtros,
         unidades_lstm=args.unidades_lstm,
         dense_unidades=args.dense_unidades,
@@ -243,6 +243,7 @@ def main() -> None:
         suavizacao_alvo=args.suavizacao_alvo,
         sazonalidade=args.sazonalidade,
         data_inicial=args.data_inicial,
+        peso_pico=args.peso_pico,
         seed=args.seed,
         split=SplitConfig(
             treino_fracao=args.treino_fracao,
