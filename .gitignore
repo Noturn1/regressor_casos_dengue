@@ -12,3 +12,4 @@ data/
 # Artefatos de experimento (regeneraveis)
 resultados_*.json
 *.log
+relatorio_outputs/
