@@ -38,10 +38,17 @@ def save_all_report_artifacts(
     date_column: str = "Data",
     dpi: int = DEFAULT_DPI,
 ) -> dict[str, Path]:
-    """Gera todas as tabelas e gráficos do relatório."""
-    output = ensure_output_dir(output_dir)
+    """Gera todas as tabelas e gráficos do relatório.
+
+    Os artefatos são separados por modelo: ficam em
+    `output_dir/<arquitetura>/`, com a arquitetura lida do JSON de
+    resultados (`modelo` quando o JSON não a informa). Assim os
+    resultados de cnn_lstm, cnn2d e efficientnet não se sobrescrevem.
+    """
     raw_df = load_raw_dataset(csv_path, date_column=date_column)
     results = load_training_results(results_path)
+    arquitetura = str(results.get("config", {}).get("arquitetura") or "modelo")
+    output = ensure_output_dir(Path(output_dir) / arquitetura)
 
     metrics_df = build_metrics_table(results)
     error_df = build_error_by_range_table(results)

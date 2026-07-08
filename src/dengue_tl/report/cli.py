@@ -26,7 +26,10 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         default=str(DEFAULT_OUTPUT_DIR),
-        help="Pasta de saida dos artefatos.",
+        help=(
+            "Pasta base de saida; os artefatos vao para uma subpasta "
+            "com o nome da arquitetura do JSON de resultados."
+        ),
     )
     parser.add_argument(
         "--date-column",
