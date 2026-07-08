@@ -14,6 +14,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+# Relatório: tabelas e gráficos (`python -m dengue_tl.report`).
+report = ["matplotlib"]
 # Deep learning: instalado só quando for treinar (evita baixar TensorFlow para rodar o pipeline de dados).
 dl = ["tensorflow", "pyts", "pillow", "scipy"]
 
