@@ -29,6 +29,7 @@ from dengue_tl.train_runner import (
     TreinoConfig,
     mae,
     prepara_dados,
+    preve_casos,
     treina_e_avalia,
 )
 
@@ -48,8 +49,9 @@ def _objetivo(trial, dados: DadosPreparados, config_base: TreinoConfig) -> float
         dados.x_treino, dados.y_treino, dados.x_val, dados.y_val, config
     )
 
-    y_pred_log = model.predict(dados.x_val, verbose=0).reshape(-1)
-    y_pred = dados.scaler_y.inverse_target(y_pred_log)
+    y_pred = preve_casos(
+        model, dados.x_val, dados.scaler_y, teto_log=float(dados.y_treino.max())
+    )
     return mae(dados.y_val_raw, y_pred)
 
 

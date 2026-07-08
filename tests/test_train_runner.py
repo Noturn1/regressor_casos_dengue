@@ -87,3 +87,19 @@ def test_treina_e_avalia_erro_quando_amostra_insuficiente(tmp_path):
 
     with pytest.raises(ValueError, match="Amostras insuficientes"):
         treina_e_avalia(TreinoConfig(csv_path=str(csv), cache_path=str(cache)))
+
+
+def test_preve_casos_limita_explosao_do_expm1():
+    from dengue_tl.scaler import Scaler
+    from dengue_tl.train_runner import preve_casos
+
+    class ModeloExplosivo:
+        def predict(self, x, verbose=0):
+            # log 20 viraria ~5e8 casos no expm1; -3 viraria contagem negativa.
+            return np.array([[20.0], [-3.0], [2.0]])
+
+    pred = preve_casos(
+        ModeloExplosivo(), x=None, scaler_y=Scaler(), teto_log=np.log1p(100.0)
+    )
+
+    np.testing.assert_allclose(pred, [100.0, 0.0, np.expm1(2.0)], rtol=1e-6)

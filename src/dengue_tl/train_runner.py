@@ -158,6 +158,17 @@ def _set_semente(seed: int) -> None:
     np.random.seed(seed)
 
 
+def preve_casos(model, x, scaler_y: Scaler, teto_log: float) -> np.ndarray:
+    """Prediz em log1p, limita a [0, teto_log] e inverte para a escala de casos.
+
+    Sem o clip, uma extrapolacao da rede em log explode no expm1 (log 20 ->
+    ~5e8 casos). O teto e o maior alvo visto no treino: alem dele o modelo nao
+    tem informacao; o piso 0 descarta contagens negativas.
+    """
+    y_pred_log = model.predict(x, verbose=0).reshape(-1)
+    return scaler_y.inverse_target(np.clip(y_pred_log, 0.0, teto_log))
+
+
 @dataclass(frozen=True)
 class DadosPreparados:
     """Dados do pipeline ja janelados, divididos, escalados e codificados.
@@ -267,8 +278,9 @@ def treina_e_avalia(config: TreinoConfig) -> dict[str, object]:
         dados.x_treino, dados.y_treino, dados.x_val, dados.y_val, config
     )
 
-    y_pred_log = model.predict(dados.x_teste, verbose=0).reshape(-1)
-    y_pred = dados.scaler_y.inverse_target(y_pred_log)
+    y_pred = preve_casos(
+        model, dados.x_teste, dados.scaler_y, teto_log=float(dados.y_treino.max())
+    )
 
     return {
         "config": asdict(config),
