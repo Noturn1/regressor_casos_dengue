@@ -9,31 +9,33 @@ Este documento resume **do que se trata o trabalho**, **o que já foi feito** e 
 O projeto estima `Qtde_Casos` de dengue de um dia (dia central) usando:
 
 1. uma tabela com features **defasadas** (clima em `t-45`, histórico de casos em `t-30`),
-2. uma **matriz 9×4** (9 dias × 4 features) transformada em imagem,
-3. regressão com **EfficientNet-B0** (transfer learning).
+2. uma **janela 9×4** (9 dias × 4 features) como entrada da rede,
+3. regressão com **CNN-LSTM** (padrão) ou **EfficientNet-B0** (alternativa com transfer learning).
 
-A ideia é produzir uma estimativa coerente e avaliá-la de forma honesta com split temporal e comparação com baselines. (A abordagem original codificava uma janela univariada de `Qtde_Casos` em imagem **GASF**; ver §3.)
+A ideia é produzir uma estimativa coerente e avaliá-la com split temporal e comparação com baselines. (A abordagem original codificava uma janela univariada de `Qtde_Casos` em imagem **GASF**; ver §3.)
 
 ---
 
 ## 2) Estado atual (o que já foi implementado)
 
-Os módulos base já estão prontos e cobertos por testes:
+Todos os módulos estão prontos e cobertos por testes:
 
 - `series_loader.py` ✅
 - `scaler.py` ✅
-- `window_builder.py` ✅ (trilha GASF univariada, original)
+- `window_builder.py` ✅ (trilha GASF univariada, legada)
 - `lagged_table.py` ✅ (tabela defasada + cache em disco)
 - `matrix_windower.py` ✅ (janelas 9×4 da tabela lagged)
 - `encoder.py` ✅ (`encode_gasf` e `encode_matrix`)
-- `model.py` ✅
-- `train_runner.py` ✅ (pipeline 9×4 fim-a-fim)
+- `models/cnn_lstm.py` ✅ (Conv1D + LSTM sobre janela 9×4 — **padrão**)
+- `models/efficientnet.py` ✅ (EfficientNet-B0 com transfer learning — alternativa)
+- `train_runner.py` ✅ (pipeline 9×4 fim-a-fim, agnóstico à arquitetura)
+- `experiment.py` ✅ (ponto de entrada central: roda pipeline + destila resumo pertinente)
 
-Situação dos testes: **48 passed** (rodar pelo venv: `venv/bin/python -m pytest`;
+Situação dos testes: **60 passed** (rodar pelo venv: `venv/bin/python -m pytest`;
 os testes de DL usam `importorskip` e são pulados fora do venv).
 
-O pipeline 9×4 roda de ponta a ponta sobre o dataset completo (`data/Dados 2007-2024.csv`,
-sem coluna de data). Entregáveis a evoluir: gráfico real × previsto automático e execução multi-seed.
+O pipeline roda de ponta a ponta sobre o dataset completo (`data/Dados 2007-2024.csv`).
+Próximo entregável: visualizações (gráfico real × previsto) via `visualizations.py` — o hook `--figuras-dir` já existe em `experiment.py`.
 
 ---
 
@@ -45,9 +47,10 @@ Pipeline **atual** (entrada em matriz 9×4 com features defasadas):
    clima em `t-45`, histórico de casos em `t-30`, alvo `Qtde_Casos[t]`.
 2. Janelar 9 linhas × 4 features por dia central (`matrix_windower.build_matrix_windows`).
 3. Split temporal treino/val/teste e escala por-feature (fit só no treino, `Scaler`).
-4. Codificar cada matriz 9×4 em imagem 100×100×3 (`encoder.encode_matrix`).
-5. Treinar EfficientNet-B0 em 2 fases (`model.build_model` / `descongela_backbone`).
+4. Preparar entrada conforme a arquitetura: CNN-LSTM recebe `(n, 9, 4)` direto; EfficientNet codifica cada 9×4 em imagem 100×100×3 via `encoder.encode_matrix`.
+5. Treinar o modelo via `models.seleciona_arquitetura` (CNN-LSTM: fase única; EfficientNet: 2 fases).
 6. Avaliar na escala original (`expm1`) e comparar com baselines (`train_runner.treina_e_avalia`).
+7. Destilar resultado em resumo pertinente (`experiment.resumo_pertinente`) e persistir JSON.
 
 > **Trilha original (GASF univariado), agora superada como entrada da rede:**
 > `window_builder.build_centrado` (janela 1-D de `Qtde_Casos`) → `encoder.encode_gasf`.
@@ -110,103 +113,72 @@ No `model.py`, há mapeamento explícito de `[-1, 1]` para `[0, 255]` antes do b
 
 ## 5.2 Código-fonte (`src/dengue_tl/`)
 
-- `series_loader.py`  
-  Lê CSV, parseia data, ordena, valida contiguidade diária e retorna variáveis esperadas.
-
-- `scaler.py`  
-  Escala features com min/max do treino; transforma alvo com `log1p` e inverte com `expm1`.
-
-- `window_builder.py`  
-  Gera janelas centradas e alvos. Padrão exclui dia central para evitar leakage.
-
-- `encoder.py`  
-  Converte janela 1-D em GASF (`pyts`), redimensiona para `100x100` e replica em 3 canais.
-
-- `model.py`  
-  Define modelo de regressão com EfficientNet-B0, cabeça densa e função para descongelar backbone (fine-tuning fase 2).
-
-- `train_runner.py`  
-  Runner fim-a-fim: carga de dados, split temporal, codificação GASF, treino em 2 fases, métricas e baselines, exportando JSON de resultados.
-
-- `lagged_table.py`  
-  Constrói a tabela supervisionada com lags separados: clima em 45 dias e histórico de casos em 30 dias.
-
-- `__init__.py`  
-  Arquivo de pacote.
+- `series_loader.py` — lê CSV, ordena, valida contiguidade diária.
+- `scaler.py` — min/max por-feature (fit só no treino); `log1p`/`expm1` no alvo.
+- `window_builder.py` — janelas centradas (trilha GASF legada, exclui dia central).
+- `lagged_table.py` — tabela supervisionada: clima `t-45`, histórico `t-30`, alvo `t`.
+- `matrix_windower.py` — janelas `(n, 9, 4)` da tabela lagged.
+- `encoder.py` — `encode_gasf` (1-D → GASF) e `encode_matrix` (9×4 → 100×100×3).
+- `models/__init__.py` — `seleciona_arquitetura(nome)`: import preguiçoso do módulo pedido.
+- `models/cnn_lstm.py` — Conv1D × 2 + LSTM + Dense(1); treino em fase única.
+- `models/efficientnet.py` — EfficientNet-B0 com cabeça densa; treino em 2 fases (congelar → fine-tune).
+- `train_runner.py` — pipeline 9×4 agnóstico à arquitetura: tabela → janela → escala → treino → métricas + baselines.
+- `tune_runner.py` — busca de hiperparâmetros (Optuna/TPE): minimiza o MAE de validação e retreina/avalia a melhor config no teste.
+- `experiment.py` — ponto de entrada: chama `treina_e_avalia`, destila `resumo_pertinente`, imprime e salva JSON.
+- `menu.py` — menu interativo que centraliza tudo (treinar, otimizar, relatório, resumos, testes); atalho `./dengue` na raiz.
 
 ## 5.3 Testes (`tests/`)
 
-- `test_series_loader.py`  
-  Valida leitura, estrutura e erro em vão temporal.
-
-- `test_scaler.py`  
-  Valida escalonamento e inversão `log1p`/`expm1`.
-
-- `test_window_builder.py`  
-  Valida quantidade de amostras, formato da janela, alvos e comportamento com/sem dia central.
-
-- `test_encoder.py`  
-  Valida shape, canais, simetria, determinismo e faixa de valores da GASF.
-
-- `test_model.py`  
-  Smoke tests do modelo, saída linear, congelamento/descongelamento e BatchNorm.
-
-- `test_train_runner.py`  
-  Testes unitários do runner (split temporal, métricas, baseline e fallback sem coluna de data).
+- `test_series_loader.py` — leitura, estrutura, erro em vão temporal.
+- `test_scaler.py` — escalonamento e inversão `log1p`/`expm1`.
+- `test_window_builder.py` — amostras, formato, alvos, com/sem dia central.
+- `test_encoder.py` — shape, canais, simetria, determinismo, faixa de valores.
+- `test_efficientnet.py` — smoke tests da EfficientNet (saída, congelar/descongelar, BatchNorm).
+- `test_cnn_lstm.py` — smoke tests da CNN-LSTM (shape de saída, treino mínimo).
+- `test_train_runner.py` — split temporal, métricas, baselines, fallback sem coluna de data.
+- `test_tune_runner.py` — espaço de busca compatível com `TreinoConfig`; otimização fim-a-fim (CNN-LSTM, 2 trials).
+- `test_experiment.py` — `resumo_pertinente`, `formata_resumo`, fluxo do `roda_experimento`.
 
 ---
 
-## 6) Status das Etapas 6 e 7
+## 6) Status do pipeline
 
-Implementado no runner:
+Pipeline completo e funcional. O que está pronto:
 
 1. split temporal treino/val/teste (sem shuffle),
-2. geração de `X`/`y` para treino com as funções já prontas,
-3. treino em duas fases (congelado → fine-tuning),
-4. predição e inversão de escala do alvo,
-5. métricas finais (MAE, RMSE, CC),
-6. baselines (média e último valor),
-7. exportação de resultado em JSON com histórico e predições.
+2. escalonamento sem vazamento (fit só no treino),
+3. treino agnóstico à arquitetura (CNN-LSTM fase única; EfficientNet 2 fases),
+4. predição e inversão de escala do alvo (`expm1`),
+5. métricas finais (MAE, RMSE, CC) + baselines (média do treino / histórico `t-30`),
+6. exportação de resultado completo em JSON (histórico, predições, métricas),
+7. resumo pertinente: melhor estimador por métrica, ganho % em MAE, melhor época.
 
-Próximos incrementos recomendados:
-
-1. gráfico real × previsto automático,
-2. tabela final de comparação pronta para relatório,
-3. agregação de múltiplas seeds.
+Próximo incremento: `visualizations.py` — gráfico real × previsto. O hook `--figuras-dir` em `experiment.py` já está pronto para recebê-lo.
 
 ---
 
-## 7) Comandos úteis já validados
-
-Instalar dependências de desenvolvimento:
+## 7) Comandos úteis
 
 ```bash
-.venv/bin/pip install -e ".[dev]"
-```
+# Menu interativo (treinar, otimizar, relatório, resumos, testes)
+./dengue
 
-Rodar todos os testes:
+# Instalar (núcleo + testes + DL + otimização + relatório)
+venv/bin/pip install -e ".[dev,dl,opt,report]"
 
-```bash
-.venv/bin/python -m pytest -q
-```
+# Rodar todos os testes
+venv/bin/python -m pytest -q
 
-Rodar um teste específico:
+# Rodar o experimento completo (CNN-LSTM, padrão)
+venv/bin/python -m dengue_tl.experiment --csv "data/Dados 2007-2024.csv"
 
-```bash
-.venv/bin/python -m pytest -q tests/test_window_builder.py::test_raio_customizado
-```
+# Com EfficientNet
+venv/bin/python -m dengue_tl.experiment --csv "data/Dados 2007-2024.csv" --arquitetura efficientnet
 
-Para módulos de deep learning:
+# Amostra pequena (raio menor para não estourar a série curta)
+venv/bin/python -m dengue_tl.experiment --csv data/AmostraDados.csv --raio 3
 
-```bash
-.venv/bin/pip install -e ".[dev,dl]"
-```
-
-Exemplo para a amostra pequena (`data/AmostraDados.csv`), usando raio compatível:
-
-```bash
-.venv/bin/python -m dengue_tl.train_runner \
-  --csv data/AmostraDados.csv \
-  --raio 3 \
-  --output-json resultados_treino.json
+# Busca de hiperparâmetros (requer extra `opt`: venv/bin/pip install -e ".[dl,opt]")
+venv/bin/python -m dengue_tl.tune_runner --csv "data/Dados 2007-2024.csv" --arquitetura cnn_lstm --n-trials 50
+venv/bin/python -m dengue_tl.tune_runner --csv "data/Dados 2007-2024.csv" --arquitetura efficientnet --n-trials 15
 ```
