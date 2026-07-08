@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Atalho para o menu interativo do projeto: ./dengue
+# Usa o Python do venv (onde estao tensorflow/optuna/matplotlib).
+set -euo pipefail
+cd "$(dirname "$0")"
+
+if [[ ! -x venv/bin/python ]]; then
+    echo "venv nao encontrado. Crie e instale as dependencias:"
+    echo "  python3 -m venv venv"
+    echo '  venv/bin/pip install -e ".[dev,dl,opt,report]"'
+    exit 1
+fi
+
+exec venv/bin/python -m dengue_tl.menu "$@"
