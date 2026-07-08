@@ -51,6 +51,10 @@ class TreinoConfig:
     learning_rate_fase1: float = 1e-3
     learning_rate_fase2: float = 1e-4
     n_camadas_finais: int = 20
+    filtros: int = 32
+    unidades_lstm: int = 32
+    dense_unidades: int = 64
+    dropout: float = 0.3
     seed: int = 42
     split: SplitConfig = field(default_factory=SplitConfig)
 
@@ -154,10 +158,42 @@ def _set_semente(seed: int) -> None:
     np.random.seed(seed)
 
 
-def treina_e_avalia(config: TreinoConfig) -> dict[str, object]:
-    """Executa treino em 2 fases e avalia modelo + baselines."""
-    _set_semente(config.seed)
+def preve_casos(model, x, scaler_y: Scaler, teto_log: float) -> np.ndarray:
+    """Prediz em log1p, limita a [0, teto_log] e inverte para a escala de casos.
 
+    Sem o clip, uma extrapolacao da rede em log explode no expm1 (log 20 ->
+    ~5e8 casos). O teto e o maior alvo visto no treino: alem dele o modelo nao
+    tem informacao; o piso 0 descarta contagens negativas.
+    """
+    y_pred_log = model.predict(x, verbose=0).reshape(-1)
+    return scaler_y.inverse_target(np.clip(y_pred_log, 0.0, teto_log))
+
+
+@dataclass(frozen=True)
+class DadosPreparados:
+    """Dados do pipeline ja janelados, divididos, escalados e codificados.
+
+    Materializa tudo que vem ANTES do treino, para que o `tune_runner` prepare
+    os dados uma unica vez e rode varios trials de treino sobre eles (a
+    codificacao em imagem da EfficientNet e cara para repetir por trial).
+    """
+
+    x_treino: np.ndarray
+    x_val: np.ndarray
+    x_teste: np.ndarray
+    y_treino: np.ndarray  # alvo em log1p
+    y_val: np.ndarray  # alvo em log1p
+    y_treino_raw: np.ndarray
+    y_val_raw: np.ndarray
+    y_teste_raw: np.ndarray
+    scaler_y: Scaler
+    baseline_media_pred: np.ndarray
+    baseline_historico_pred: np.ndarray
+    split: tuple[slice, slice, slice]
+
+
+def prepara_dados(config: TreinoConfig) -> DadosPreparados:
+    """Tabela lagged -> janelas 9x4 -> split temporal -> escala -> entrada da rede."""
     tabela = carrega_tabela_lagged(config)
     X, y = build_matrix_windows(tabela, MatrixWindowConfig(raio=config.raio))
 
@@ -182,6 +218,7 @@ def treina_e_avalia(config: TreinoConfig) -> dict[str, object]:
 
     # Baselines na escala original de casos (usam X/y nao escalados).
     y_treino_raw = y[treino_sl].astype(float)
+    y_val_raw = y[val_sl].astype(float)
     y_teste_raw = y[teste_sl].astype(float)
     idx_historico = feature_columns(tabela).index(
         f"Historico_lag{config.lag_historico}"
@@ -202,19 +239,48 @@ def treina_e_avalia(config: TreinoConfig) -> dict[str, object]:
 
     # Import lazy: permite testar a logica (split/baselines) sem dependencias de DL.
     # Cada arquitetura mora em seu arquivo (dengue_tl/models/) e implementa a
-    # mesma interface: prepara_entrada + treina. Ver dengue_tl.models.
+    # mesma interface: prepara_entrada + treina + espaco_busca. Ver dengue_tl.models.
     from dengue_tl.models import seleciona_arquitetura
 
     modulo = seleciona_arquitetura(config.arquitetura)
     entradas = modulo.prepara_entrada(X_escalado)
-    x_treino = entradas[treino_sl]
-    x_val = entradas[val_sl]
-    x_teste = entradas[teste_sl]
 
-    model, historico = modulo.treina(x_treino, y_treino, x_val, y_val, config)
+    return DadosPreparados(
+        x_treino=entradas[treino_sl],
+        x_val=entradas[val_sl],
+        x_teste=entradas[teste_sl],
+        y_treino=y_treino,
+        y_val=y_val,
+        y_treino_raw=y_treino_raw,
+        y_val_raw=y_val_raw,
+        y_teste_raw=y_teste_raw,
+        scaler_y=scaler_y,
+        baseline_media_pred=baseline_media_pred,
+        baseline_historico_pred=baseline_historico_pred,
+        split=(treino_sl, val_sl, teste_sl),
+    )
 
-    y_pred_log = model.predict(x_teste, verbose=0).reshape(-1)
-    y_pred = scaler_y.inverse_target(y_pred_log)
+
+def treina_e_avalia(config: TreinoConfig) -> dict[str, object]:
+    """Executa treino em 2 fases e avalia modelo + baselines."""
+    _set_semente(config.seed)
+
+    dados = prepara_dados(config)
+    treino_sl, val_sl, teste_sl = dados.split
+    y_teste_raw = dados.y_teste_raw
+    baseline_media_pred = dados.baseline_media_pred
+    baseline_historico_pred = dados.baseline_historico_pred
+
+    from dengue_tl.models import seleciona_arquitetura
+
+    modulo = seleciona_arquitetura(config.arquitetura)
+    model, historico = modulo.treina(
+        dados.x_treino, dados.y_treino, dados.x_val, dados.y_val, config
+    )
+
+    y_pred = preve_casos(
+        model, dados.x_teste, dados.scaler_y, teto_log=float(dados.y_treino.max())
+    )
 
     return {
         "config": asdict(config),
@@ -246,7 +312,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--arquitetura",
         default="cnn_lstm",
-        help="Arquitetura do modelo (cnn_lstm | efficientnet).",
+        help="Arquitetura do modelo (cnn_lstm | cnn2d | efficientnet).",
     )
     parser.add_argument(
         "--cache-path",
@@ -268,6 +334,10 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--lr-fase1", type=float, default=1e-3)
     parser.add_argument("--lr-fase2", type=float, default=1e-4)
     parser.add_argument("--n-camadas-finais", type=int, default=20)
+    parser.add_argument("--filtros", type=int, default=32)
+    parser.add_argument("--unidades-lstm", type=int, default=32)
+    parser.add_argument("--dense-unidades", type=int, default=64)
+    parser.add_argument("--dropout", type=float, default=0.3)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--treino-fracao", type=float, default=0.7)
     parser.add_argument("--validacao-fracao", type=float, default=0.15)
@@ -290,6 +360,10 @@ def main() -> None:
         learning_rate_fase1=args.lr_fase1,
         learning_rate_fase2=args.lr_fase2,
         n_camadas_finais=args.n_camadas_finais,
+        filtros=args.filtros,
+        unidades_lstm=args.unidades_lstm,
+        dense_unidades=args.dense_unidades,
+        dropout=args.dropout,
         seed=args.seed,
         split=SplitConfig(
             treino_fracao=args.treino_fracao,

@@ -28,7 +28,15 @@ data/
   └── Dados 2007-2024.csv    ← dataset completo de Cascavel (6575 dias, sem coluna de data)
 ```
 
-### Rodar o pipeline completo
+### Rodar (menu interativo)
+
+```bash
+./dengue
+# menu com: treinar (cnn_lstm | efficientnet), otimizar hiperparâmetros (Optuna),
+# gerar relatório (tabelas + gráficos), ver resumo de resultados, rodar testes
+```
+
+### Rodar o pipeline direto (sem menu)
 
 ```bash
 venv/bin/python -m dengue_tl.experiment --csv "data/Dados 2007-2024.csv"
@@ -40,7 +48,7 @@ venv/bin/python -m dengue_tl.experiment --csv "data/Dados 2007-2024.csv"
 
 ```bash
 python -m venv venv && source venv/bin/activate
-pip install -e ".[dev,dl]"   # dl traz tensorflow, pyts, pillow, scipy
+pip install -e ".[dev,dl,opt,report]"   # dl: tensorflow…; opt: optuna; report: matplotlib
 venv/bin/python -m pytest    # 60 testes; os de DL usam importorskip
 ```
 

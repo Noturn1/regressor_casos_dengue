@@ -163,7 +163,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--arquitetura",
         default="cnn_lstm",
-        help="Arquitetura do modelo (cnn_lstm | efficientnet).",
+        help="Arquitetura do modelo (cnn_lstm | cnn2d | efficientnet).",
     )
     parser.add_argument("--cache-path", default="cache/tabela_lagged.csv")
     parser.add_argument("--lag-clima", type=int, default=45)
@@ -176,6 +176,10 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--lr-fase1", type=float, default=1e-3)
     parser.add_argument("--lr-fase2", type=float, default=1e-4)
     parser.add_argument("--n-camadas-finais", type=int, default=20)
+    parser.add_argument("--filtros", type=int, default=32)
+    parser.add_argument("--unidades-lstm", type=int, default=32)
+    parser.add_argument("--dense-unidades", type=int, default=64)
+    parser.add_argument("--dropout", type=float, default=0.3)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--treino-fracao", type=float, default=0.7)
     parser.add_argument("--validacao-fracao", type=float, default=0.15)
@@ -208,6 +212,10 @@ def main() -> None:
         learning_rate_fase1=args.lr_fase1,
         learning_rate_fase2=args.lr_fase2,
         n_camadas_finais=args.n_camadas_finais,
+        filtros=args.filtros,
+        unidades_lstm=args.unidades_lstm,
+        dense_unidades=args.dense_unidades,
+        dropout=args.dropout,
         seed=args.seed,
         split=SplitConfig(
             treino_fracao=args.treino_fracao,

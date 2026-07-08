@@ -1,4 +1,4 @@
-# Contexto — Estimativa de casos de dengue com EfficientNet
+# Contexto — Estimativa de casos de dengue com CNN-LSTM / EfficientNet
 
 Trabalho de disciplina: estimar o número de casos de dengue de um dia a partir de uma
 imagem que codifica dados estruturados ao redor desse dia, usando **transfer learning**
@@ -31,7 +31,15 @@ antes do fim da rede. 100×100 sobrevive ao downsampling (→ ~3×3) e é mais b
 224×224 nativos. A interpolação só espalha os 36 valores num canvas maior; não cria
 informação.
 
-**Backbone**: EfficientNet-B0 pré-treinada (ImageNet), extratora de features.
+**Arquitetura padrão**: CNN-LSTM — duas `Conv1D` + `LSTM` sobre a janela `(9, 4)` diretamente, sem codificação em imagem. Rede minúscula (poucos milhares de parâmetros), treina em segundos na CPU.
+
+**Arquitetura alternativa**: EfficientNet-B0 pré-treinada (ImageNet) — requer codificar a janela 9×4 em imagem 100×100×3 via `encode_matrix`. Treino em 2 fases (backbone congelado → fine-tune). Seleção via `--arquitetura` em `experiment.py`.
+
+**Otimização de hiperparâmetros**: `tune_runner.py` roda uma busca Optuna (TPE) sobre o
+`espaco_busca` declarado no módulo de cada arquitetura, minimizando o **MAE de validação
+na escala original**. O teste nunca entra na busca: só é usado uma vez, no retreino final
+com a melhor configuração. Os dados são preparados uma única vez (`prepara_dados`) e
+reutilizados por todos os trials.
 
 ## Fatos dos dados
 

@@ -73,7 +73,7 @@ def treina(x_treino, y_treino, x_val, y_val, config):
     """Fine-tuning em 2 fases: cabeça congelada e depois últimos blocos."""
     keras.utils.set_random_seed(config.seed)
 
-    model = build_efficientnet(weights="imagenet")
+    model = build_efficientnet(weights="imagenet", dropout=config.dropout)
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=config.learning_rate_fase1),
         loss="mse",
@@ -120,3 +120,18 @@ def treina(x_treino, y_treino, x_val, y_val, config):
         "fase2": {k: [float(v) for v in vs] for k, vs in hist_fase2.history.items()},
     }
     return model, historico
+
+
+def espaco_busca(trial) -> dict:
+    """Espaço de busca do Optuna. As chaves são campos de `TreinoConfig`."""
+    return {
+        "dropout": trial.suggest_float("dropout", 0.0, 0.5),
+        "learning_rate_fase1": trial.suggest_float(
+            "learning_rate_fase1", 1e-4, 1e-2, log=True
+        ),
+        "learning_rate_fase2": trial.suggest_float(
+            "learning_rate_fase2", 1e-6, 1e-3, log=True
+        ),
+        "n_camadas_finais": trial.suggest_int("n_camadas_finais", 10, 60, step=10),
+        "batch_size": trial.suggest_categorical("batch_size", [16, 32]),
+    }
