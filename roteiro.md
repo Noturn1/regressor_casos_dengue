@@ -1,5 +1,7 @@
 # Roteiro — Estimar casos de dengue com EfficientNet
 
+> ⚠️ **Nota histórica:** A trilha de EfficientNet com imagens GASF descrita neste roteiro foi posteriormente removida do escopo do projeto. As arquiteturas atuais são **CNN-LSTM** e **CNN2D**, operando sobre a janela 9×4 bruta (matriz de defasagens) via `prepara_entrada`. Para detalhes atuais, ver `CONTEXT.md` e `GUIA_PROJETO.md`.
+
 > Passo a passo do trabalho. Vocabulário e fatos dos dados em `CONTEXT.md`.
 > Este é um repositório **standalone**: `series_loader.py` e `scaler.py` já vêm
 > prontos (copiados de uma IC); os demais módulos você implementa.
