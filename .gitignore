@@ -9,7 +9,11 @@ dist/
 cache/
 data/
 
-# Artefatos de experimento (regeneraveis)
-resultados_*.json
+# Artefatos gerados (regeneraveis): resultados, otimizacao, best config e
+# relatorios, todos sob outputs/<arquitetura>/ (ver dengue_tl/paths.py).
+outputs/
 *.log
+# Legado (antes de outputs/): raiz e pasta antiga de relatorio.
+resultados_*.json
+best_hiperparametros_*.json
 relatorio_outputs/

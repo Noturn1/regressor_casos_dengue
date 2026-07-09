@@ -30,6 +30,7 @@ from dengue_tl.matrix_windower import (
     build_matrix_windows,
     feature_columns,
 )
+from dengue_tl.paths import caminho_resultado, garante_pai
 from dengue_tl.scaler import Scaler
 
 
@@ -46,7 +47,14 @@ class TreinoConfig:
     arquitetura: str = "cnn_lstm"  # ver dengue_tl.models.ARQUITETURAS
     lag_clima: int = 45
     lag_historico: int = 30
-    raio: int = 4  # janela de 2*raio+1 == 9 linhas
+    raio: int = 4  # janela de 2*raio+1 == 9 linhas (modo lagged)
+    # Preparacao dos dados. "lagged" (padrao): features ja defasadas em matriz 9x4
+    # (matrix_windower). "sequencia": janela crua dos ultimos `janela_dias` dias
+    # das 4 variaveis, terminando em t-`gap_dias`, para o LSTM DESCOBRIR a
+    # dependencia temporal em vez de recebe-la cravada (ver sequence_windower).
+    modo: str = "lagged"
+    janela_dias: int = 60  # tamanho da janela crua (modo sequencia)
+    gap_dias: int = 30  # defasagem minima da janela ao alvo (anti-vazamento)
     batch_size: int = 32
     epocas: int = 30
     paciencia_early_stopping: int = 5
@@ -294,10 +302,40 @@ class DadosPreparados:
     split: tuple[slice, slice, slice]
 
 
-def prepara_dados(config: TreinoConfig) -> DadosPreparados:
-    """Tabela lagged -> janelas 9x4 -> split temporal -> escala -> entrada da rede."""
+def _constroi_janelas(config: TreinoConfig):
+    """Constroi `(X, y, hist_raw)` conforme o modo de preparacao.
+
+    `hist_raw` e o caso mais recente disponivel por amostra (denominador da
+    log-razao e baseline de persistencia): no modo lagged e `Historico_lag30`
+    do dia central; no modo sequencia e `Qtde_Casos[t - gap]` (ultimo dia da
+    janela). Em ambos os modos e exatamente o baseline_historico.
+    """
+    if config.modo == "sequencia":
+        from dengue_tl.sequence_windower import (
+            SequenceWindowConfig,
+            build_sequence_windows,
+        )
+
+        X, y, hist_raw = build_sequence_windows(
+            config.csv_path,
+            SequenceWindowConfig(
+                janela_dias=config.janela_dias, gap_dias=config.gap_dias
+            ),
+        )
+        return X, y, hist_raw.astype(float)
+
     tabela = carrega_tabela_lagged(config)
     X, y = build_matrix_windows(tabela, MatrixWindowConfig(raio=config.raio))
+    idx_historico = feature_columns(tabela).index(
+        f"Historico_lag{config.lag_historico}"
+    )
+    hist_raw = X[:, config.raio, idx_historico].astype(float)
+    return X, y, hist_raw
+
+
+def prepara_dados(config: TreinoConfig) -> DadosPreparados:
+    """Janelas (lagged 9x4 ou sequencia crua) -> split -> escala -> entrada da rede."""
+    X, y, hist_raw = _constroi_janelas(config)
 
     minimo_split = _min_amostras_para_split(
         treino_fracao=config.split.treino_fracao,
@@ -305,11 +343,10 @@ def prepara_dados(config: TreinoConfig) -> DadosPreparados:
     )
     if len(y) < minimo_split:
         raise ValueError(
-            "Amostras insuficientes apos aplicar lags e janela 9x4. "
-            f"Linhas na tabela lagged: {len(tabela)} (os primeiros "
-            f"{max(config.lag_clima, config.lag_historico)} dias somem no dropna dos lags); "
-            f"raio: {config.raio}; amostras 9x4 geradas: {len(y)}; minimo exigido: {minimo_split}. "
-            "Sugestao: usar uma serie maior ou reduzir --lag-clima/--lag-historico/--raio."
+            "Amostras insuficientes apos janelar. "
+            f"Amostras geradas: {len(y)}; minimo exigido: {minimo_split}. "
+            "Sugestao: usar uma serie maior ou reduzir --janela-dias/--gap-dias "
+            "(modo sequencia) ou --lag-clima/--lag-historico/--raio (modo lagged)."
         )
 
     treino_sl, val_sl, teste_sl = split_temporal(
@@ -322,13 +359,9 @@ def prepara_dados(config: TreinoConfig) -> DadosPreparados:
     y_treino_raw = y[treino_sl].astype(float)
     y_val_raw = y[val_sl].astype(float)
     y_teste_raw = y[teste_sl].astype(float)
-    idx_historico = feature_columns(tabela).index(
-        f"Historico_lag{config.lag_historico}"
-    )
     baseline_media_pred = baseline_media(y_treino_raw, tamanho=len(y_teste_raw))
-    baseline_historico_pred = baseline_historico(
-        X[teste_sl], raio=config.raio, idx_historico=idx_historico
-    )
+    # Baseline de persistencia == caso mais recente disponivel (hist_raw).
+    baseline_historico_pred = hist_raw[teste_sl].astype(float)
 
     # Escala das features por-coluna: fit SO no treino (sem vazamento temporal).
     scaler_x = Scaler().fit(X[treino_sl])
@@ -336,9 +369,8 @@ def prepara_dados(config: TreinoConfig) -> DadosPreparados:
 
     # Alvo do modelo: casos e historico do dia central suavizados (media movel
     # centrada, ruido semanal de notificacao), depois log-razao ou log1p.
-    # A suavizacao do historico usa valores com >= lag-3 dias de idade: sem
+    # A suavizacao do historico usa valores com >= gap-3 dias de idade: sem
     # vazamento do presente.
-    hist_raw = X[:, config.raio, idx_historico].astype(float)
     y_suave = _media_movel_centrada(y.astype(float), config.suavizacao_alvo)
     hist_suave = _media_movel_centrada(hist_raw, config.suavizacao_alvo)
 
@@ -453,7 +485,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--arquitetura",
         default="cnn_lstm",
-        help="Arquitetura do modelo (cnn_lstm | cnn2d).",
+        help="Arquitetura do modelo (cnn_lstm | cnn2d | mlp).",
     )
     parser.add_argument(
         "--cache-path",
@@ -464,10 +496,22 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--lag-historico", type=int, default=30)
     parser.add_argument(
         "--output-json",
-        default="resultados_treino.json",
-        help="Arquivo JSON de saida com metricas e predicoes.",
+        default=None,
+        help="JSON de saida. Padrao: outputs/<arquitetura>/resultado.json.",
     )
     parser.add_argument("--raio", type=int, default=4)
+    parser.add_argument(
+        "--modo",
+        default="lagged",
+        choices=("lagged", "sequencia"),
+        help="Preparacao: lagged (matriz 9x4 defasada) ou sequencia (janela crua p/ o LSTM).",
+    )
+    parser.add_argument(
+        "--janela-dias", type=int, default=60, help="Tamanho da janela crua (modo sequencia)."
+    )
+    parser.add_argument(
+        "--gap-dias", type=int, default=30, help="Defasagem minima da janela ao alvo (modo sequencia)."
+    )
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--epocas", type=int, default=30)
     parser.add_argument("--paciencia", type=int, default=5)
@@ -520,6 +564,9 @@ def main() -> None:
         lag_clima=args.lag_clima,
         lag_historico=args.lag_historico,
         raio=args.raio,
+        modo=args.modo,
+        janela_dias=args.janela_dias,
+        gap_dias=args.gap_dias,
         batch_size=args.batch_size,
         epocas=args.epocas,
         paciencia_early_stopping=args.paciencia,
@@ -540,7 +587,7 @@ def main() -> None:
         ),
     )
     resultado = treina_e_avalia(config)
-    output = Path(args.output_json)
+    output = garante_pai(args.output_json or caminho_resultado(config.arquitetura))
     output.write_text(json.dumps(resultado, indent=2), encoding="utf-8")
     print(f"Resultado salvo em: {output}")
 
