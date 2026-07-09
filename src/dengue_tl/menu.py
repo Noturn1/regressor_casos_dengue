@@ -80,6 +80,29 @@ def _escolhe(titulo: str, opcoes: list[str], default_idx: int = 0) -> str:
         print("  opcao invalida.")
 
 
+def _escolhe_multiplos(titulo: str, opcoes: list[str]) -> list[str]:
+    """Seleção múltipla: mostra lista numerada, retorna as escolhidas (mín. 1)."""
+    print(f"\n{titulo}")
+    for i, opcao in enumerate(opcoes, start=1):
+        print(f"  {i}. {opcao}")
+    print(f"  (Enter = todas; ex.: 1 3 ou 1,3)")
+    while True:
+        resposta = input(f"Escolha [1-{len(opcoes)}]: ").strip()
+        if not resposta:
+            return opcoes
+        tokens = resposta.replace(",", " ").split()
+        try:
+            indices = [int(t) for t in tokens]
+        except ValueError:
+            print("  entrada invalida — use numeros separados por espaco ou virgula.")
+            continue
+        if any(i < 1 or i > len(opcoes) for i in indices):
+            print(f"  numeros fora do intervalo 1-{len(opcoes)}.")
+            continue
+        escolhidas = list(dict.fromkeys(opcoes[i - 1] for i in indices))
+        return escolhidas
+
+
 def _escolhe_csv() -> str:
     csvs = sorted(str(p) for p in CSV_DIR.glob("*.csv"))
     if not csvs:
@@ -288,34 +311,42 @@ def _gera_relatorio(csv: str, resultados: Path) -> str | None:
 
 
 def _gera_comparacao(csv: str, output_dir: str) -> None:
-    """Gera tabela + gráfico comparativo entre as arquiteturas com resultados disponíveis."""
+    """Gera tabela + gráfico comparativo entre arquiteturas escolhidas pelo usuário."""
     try:
         from dengue_tl.report.artifacts import save_comparison_artifacts
     except ImportError:
         print("Modulo de relatorio indisponivel.")
         return
 
-    # Prefere resultado.json (treino direto); cai em otimizacao.json se nao houver.
-    caminhos: dict[str, Path] = {}
+    # Monta mapa label -> caminho para todas as arquiteturas com resultado.
+    disponiveis: dict[str, Path] = {}
     for arq in ARQUITETURAS:
         resultado = caminho_resultado(arq)
         otimizacao = caminho_otimizacao(arq)
         if resultado.exists():
-            caminhos[arq.upper().replace("_", "-")] = resultado
+            disponiveis[arq.upper().replace("_", "-")] = resultado
         elif otimizacao.exists():
-            caminhos[arq.upper().replace("_", "-")] = otimizacao
+            disponiveis[arq.upper().replace("_", "-")] = otimizacao
 
-    if len(caminhos) < 2:
-        disponiveis = [arq for arq in ARQUITETURAS if caminho_resultado(arq).exists() or caminho_otimizacao(arq).exists()]
-        print(f"Comparativo requer ao menos 2 arquiteturas com resultados. Disponíveis: {disponiveis or 'nenhuma'}")
+    if len(disponiveis) < 2:
+        print(
+            f"Comparativo requer ao menos 2 arquiteturas com resultados. "
+            f"Disponíveis: {list(disponiveis) or 'nenhuma'}"
+        )
         return
 
-    print("\nArquiteturas para comparacao:")
+    labels_disponiveis = list(disponiveis)
+    escolhidas = _escolhe_multiplos(
+        "Quais arquiteturas incluir no comparativo?", labels_disponiveis
+    )
+    if len(escolhidas) < 2:
+        print("Selecione ao menos 2 arquiteturas para o comparativo.")
+        return
+
+    caminhos = {label: disponiveis[label] for label in escolhidas}
+    print("\nArquiteturas selecionadas:")
     for label, p in caminhos.items():
         print(f"  {label}: {p}")
-
-    if not _confirma("Gerar comparativo?"):
-        return
 
     artefatos = save_comparison_artifacts(
         csv_path=csv, results_paths=caminhos, output_dir=output_dir
@@ -331,8 +362,33 @@ def acao_relatorio() -> None:
         return
     csv = _escolhe_csv()
     output_dir = _gera_relatorio(csv=csv, resultados=resultados)
-    if output_dir and _confirma("Gerar comparativo CNN-LSTM vs CNN2D?", default=False):
+    if output_dir and _confirma("Gerar comparativo entre arquiteturas?", default=False):
         _gera_comparacao(csv=csv, output_dir=output_dir)
+
+
+def acao_comparar() -> None:
+    """Gera o comparativo entre todas as arquiteturas com resultados em outputs/."""
+    from dengue_tl.paths import OUTPUTS_DIR
+
+    disponiveis = [
+        arq for arq in ARQUITETURAS
+        if caminho_resultado(arq).exists() or caminho_otimizacao(arq).exists()
+    ]
+    if len(disponiveis) < 2:
+        print(
+            f"Comparativo requer ao menos 2 arquiteturas com resultados em outputs/.\n"
+            f"  Com resultado: {disponiveis or 'nenhuma'}\n"
+            f"  Sem resultado: {[a for a in ARQUITETURAS if a not in disponiveis]}"
+        )
+        return
+
+    csv = _escolhe_csv()
+    try:
+        from dengue_tl.report.data_io import DEFAULT_OUTPUT_DIR
+        output_dir = _pergunta("Pasta de saida", str(DEFAULT_OUTPUT_DIR))
+    except ImportError:
+        output_dir = str(OUTPUTS_DIR)
+    _gera_comparacao(csv=csv, output_dir=output_dir)
 
 
 def acao_ver_resumo() -> None:
@@ -366,6 +422,7 @@ ACOES = [
     ("Treinar e avaliar um modelo", acao_treinar),
     ("Otimizar hiperparametros (Optuna)", acao_otimizar),
     ("Gerar relatorio (tabelas + graficos)", acao_relatorio),
+    ("Gerar comparativo entre arquiteturas", acao_comparar),
     ("Ver resumo de um resultado salvo", acao_ver_resumo),
     ("Rodar os testes", acao_testes),
 ]
