@@ -192,8 +192,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--sazonalidade",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Adiciona sin/cos do dia-do-ano como features (--no-sazonalidade desativa).",
+        default=False,
+        help="Ablation: adiciona sin/cos do dia-do-ano como features (desligado por padrao).",
     )
     parser.add_argument(
         "--data-inicial",
