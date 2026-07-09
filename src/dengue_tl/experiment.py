@@ -20,6 +20,7 @@ import argparse
 import json
 from pathlib import Path
 
+from dengue_tl.paths import caminho_resultado, garante_pai
 from dengue_tl.train_runner import (
     SplitConfig,
     TreinoConfig,
@@ -163,12 +164,24 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--arquitetura",
         default="cnn_lstm",
-        help="Arquitetura do modelo (cnn_lstm | cnn2d).",
+        help="Arquitetura do modelo (cnn_lstm | cnn2d | mlp).",
     )
     parser.add_argument("--cache-path", default="cache/tabela_lagged.csv")
     parser.add_argument("--lag-clima", type=int, default=45)
     parser.add_argument("--lag-historico", type=int, default=30)
     parser.add_argument("--raio", type=int, default=4)
+    parser.add_argument(
+        "--modo",
+        default="lagged",
+        choices=("lagged", "sequencia"),
+        help="Preparacao: lagged (matriz 9x4 defasada) ou sequencia (janela crua p/ o LSTM).",
+    )
+    parser.add_argument(
+        "--janela-dias", type=int, default=60, help="Tamanho da janela crua (modo sequencia)."
+    )
+    parser.add_argument(
+        "--gap-dias", type=int, default=30, help="Defasagem minima da janela ao alvo (modo sequencia)."
+    )
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--epocas", type=int, default=30)
     parser.add_argument("--paciencia", type=int, default=5)
@@ -211,8 +224,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--validacao-fracao", type=float, default=0.15)
     parser.add_argument(
         "--output-json",
-        default="resultados_experimento.json",
-        help="Arquivo JSON com o resultado completo (artefato para as visualizações).",
+        default=None,
+        help="JSON com o resultado completo. Padrao: outputs/<arquitetura>/resultado.json.",
     )
     parser.add_argument(
         "--figuras-dir",
@@ -231,6 +244,9 @@ def main() -> None:
         lag_clima=args.lag_clima,
         lag_historico=args.lag_historico,
         raio=args.raio,
+        modo=args.modo,
+        janela_dias=args.janela_dias,
+        gap_dias=args.gap_dias,
         batch_size=args.batch_size,
         epocas=args.epocas,
         paciencia_early_stopping=args.paciencia,
@@ -255,7 +271,7 @@ def main() -> None:
 
     print(formata_resumo(resultado["resumo"]))
 
-    saida = Path(args.output_json)
+    saida = garante_pai(args.output_json or caminho_resultado(args.arquitetura))
     saida.write_text(json.dumps(resultado, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"\nResultado completo salvo em: {saida}")
 

@@ -24,6 +24,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+from dengue_tl.paths import caminho_otimizacao, garante_pai
 from dengue_tl.train_runner import (
     DadosPreparados,
     SplitConfig,
@@ -102,7 +103,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--arquitetura",
         default="cnn_lstm",
-        help="Arquitetura do modelo (cnn_lstm | cnn2d).",
+        help="Arquitetura do modelo (cnn_lstm | cnn2d | mlp).",
     )
     parser.add_argument("--n-trials", type=int, default=50)
     parser.add_argument(
@@ -131,10 +132,18 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output-json",
-        default="resultados_otimizacao.json",
-        help="Arquivo JSON de saida com trials, melhor config e avaliacao final.",
+        default=None,
+        help="JSON com trials/melhor config. Padrao: outputs/<arquitetura>/otimizacao.json.",
     )
     parser.add_argument("--raio", type=int, default=4)
+    parser.add_argument(
+        "--modo",
+        default="lagged",
+        choices=("lagged", "sequencia"),
+        help="Preparacao: lagged (matriz 9x4 defasada) ou sequencia (janela crua p/ o LSTM).",
+    )
+    parser.add_argument("--janela-dias", type=int, default=60)
+    parser.add_argument("--gap-dias", type=int, default=30)
     parser.add_argument("--epocas", type=int, default=30)
     parser.add_argument("--paciencia", type=int, default=5)
     parser.add_argument("--seed", type=int, default=42)
@@ -155,6 +164,9 @@ def main() -> None:
         data_inicial=args.data_inicial,
         peso_pico=args.peso_pico,
         raio=args.raio,
+        modo=args.modo,
+        janela_dias=args.janela_dias,
+        gap_dias=args.gap_dias,
         epocas=args.epocas,
         paciencia_early_stopping=args.paciencia,
         seed=args.seed,
@@ -164,7 +176,7 @@ def main() -> None:
         ),
     )
     resultado = otimiza(config_base, n_trials=args.n_trials)
-    output = Path(args.output_json)
+    output = garante_pai(args.output_json or caminho_otimizacao(config_base.arquitetura))
     output.write_text(json.dumps(resultado, indent=2), encoding="utf-8")
     print(f"Melhores hiperparametros: {resultado['melhores_hiperparametros']}")
     print(f"MAE validacao do melhor trial: {resultado['melhor_val_mae']:.4f}")
