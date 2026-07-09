@@ -8,8 +8,9 @@ configuracao (via `treina_e_avalia`), para que a metrica reportada continue
 honesta.
 
 Os dados sao preparados uma unica vez (`prepara_dados`) e reutilizados por
-todos os trials — importante para a EfficientNet, cuja codificacao das janelas
-em imagens 100x100x3 e cara. Requer os extras `dl` (tensorflow) e `optuna`.
+todos os trials. O `peso_pico` (peso de amostra) entra no `espaco_busca`, entao
+varia por trial: o `sample_weight` e recalculado a cada treino a partir do
+`nivel_treino` guardado — barato. Requer os extras `dl` (tensorflow) e `optuna`.
 
 Uso:
     python -m dengue_tl.tune_runner --csv data/AmostraDados.csv \
@@ -28,6 +29,7 @@ from dengue_tl.train_runner import (
     SplitConfig,
     TreinoConfig,
     mae,
+    pesos_por_nivel,
     prepara_dados,
     preve_casos,
     treina_e_avalia,
@@ -46,7 +48,12 @@ def _objetivo(trial, dados: DadosPreparados, config_base: TreinoConfig) -> float
     config = replace(config_base, **modulo.espaco_busca(trial))
 
     model, _ = modulo.treina(
-        dados.x_treino, dados.y_treino, dados.x_val, dados.y_val, config
+        dados.x_treino,
+        dados.y_treino,
+        dados.x_val,
+        dados.y_val,
+        config,
+        sample_weight=pesos_por_nivel(dados.nivel_treino, config.peso_pico),
     )
 
     y_pred = preve_casos(model, dados.x_val, dados.transformador, dados.hist_val)
@@ -95,7 +102,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--arquitetura",
         default="cnn_lstm",
-        help="Arquitetura do modelo (cnn_lstm | cnn2d | efficientnet).",
+        help="Arquitetura do modelo (cnn_lstm | cnn2d).",
     )
     parser.add_argument("--n-trials", type=int, default=50)
     parser.add_argument(
@@ -117,13 +124,18 @@ def _parse_args() -> argparse.Namespace:
         help="Data do 1o registro (serie dateless), base do calendario sazonal.",
     )
     parser.add_argument(
+        "--peso-pico",
+        type=float,
+        default=0.0,
+        help="Peso extra dos dias de alto numero de casos na loss (0 desativa).",
+    )
+    parser.add_argument(
         "--output-json",
         default="resultados_otimizacao.json",
         help="Arquivo JSON de saida com trials, melhor config e avaliacao final.",
     )
     parser.add_argument("--raio", type=int, default=4)
-    parser.add_argument("--epocas-fase1", type=int, default=20)
-    parser.add_argument("--epocas-fase2", type=int, default=10)
+    parser.add_argument("--epocas", type=int, default=30)
     parser.add_argument("--paciencia", type=int, default=5)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--treino-fracao", type=float, default=0.7)
@@ -141,9 +153,9 @@ def main() -> None:
         lag_historico=args.lag_historico,
         sazonalidade=args.sazonalidade,
         data_inicial=args.data_inicial,
+        peso_pico=args.peso_pico,
         raio=args.raio,
-        epocas_fase1=args.epocas_fase1,
-        epocas_fase2=args.epocas_fase2,
+        epocas=args.epocas,
         paciencia_early_stopping=args.paciencia,
         seed=args.seed,
         split=SplitConfig(

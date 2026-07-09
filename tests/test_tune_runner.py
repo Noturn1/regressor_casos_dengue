@@ -48,8 +48,7 @@ def test_otimiza_cnn_lstm_fim_a_fim(tmp_path):
         csv_path=str(csv),
         cache_path=str(tmp_path / "cache.csv"),
         arquitetura="cnn_lstm",
-        epocas_fase1=2,
-        epocas_fase2=0,
+        epocas=2,
         paciencia_early_stopping=2,
     )
 

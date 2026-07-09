@@ -43,7 +43,7 @@ def save_all_report_artifacts(
     Os artefatos são separados por modelo: ficam em
     `output_dir/<arquitetura>/`, com a arquitetura lida do JSON de
     resultados (`modelo` quando o JSON não a informa). Assim os
-    resultados de cnn_lstm, cnn2d e efficientnet não se sobrescrevem.
+    resultados de cnn_lstm e cnn2d não se sobrescrevem.
     """
     raw_df = load_raw_dataset(csv_path, date_column=date_column)
     results = load_training_results(results_path)

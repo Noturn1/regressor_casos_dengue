@@ -11,11 +11,6 @@ import pandas as pd
 from dengue_tl.lagged_table import VARIAVEL_ALVO, VARIAVEIS_CLIMATICAS
 from dengue_tl.report.data_io import extract_test_predictions
 
-BACKBONE_NOME = "efficientnetb0"
-# Mesmo valor de `dengue_tl.encoder.TAMANHO_IMAGEM`, sem importar o módulo:
-# `encoder` puxa pyts/scipy (extra `dl`), pesado demais para montar uma string.
-TAMANHO_IMAGEM = 100
-
 
 def _format_value(value: Any) -> Any:
     """Formata valores para escrita em CSV."""
@@ -87,8 +82,6 @@ def build_pipeline_config_table(results: dict[str, Any]) -> pd.DataFrame:
         ("raio", raio),
         ("tamanho_da_janela", janela),
         ("shape_matriz_entrada", f"({janela}, 4)"),
-        ("shape_imagem", f"({TAMANHO_IMAGEM}, {TAMANHO_IMAGEM}, 3)"),
-        ("backbone", BACKBONE_NOME),
         ("metricas_usadas", "MAE, RMSE, CC"),
         ("baselines_usados", "baseline_media, baseline_historico"),
     ]

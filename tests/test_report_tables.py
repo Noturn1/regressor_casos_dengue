@@ -70,7 +70,6 @@ def test_build_pipeline_config_table_deriva_janela_do_raio():
     assert valores["raio"] == 4
     assert valores["tamanho_da_janela"] == 9
     assert valores["shape_matriz_entrada"] == "(9, 4)"
-    assert valores["shape_imagem"] == "(100, 100, 3)"
 
 
 def test_build_split_table_calcula_quantidades_e_porcentagens():
