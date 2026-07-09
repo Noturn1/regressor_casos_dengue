@@ -55,6 +55,7 @@ def test_otimiza_cnn_lstm_fim_a_fim(tmp_path):
     resultado = otimiza(config, n_trials=2)
 
     assert len(resultado["trials"]) == 2
+    assert resultado["metrica_busca"] == "mae"  # default
     assert resultado["melhor_val_mae"] == pytest.approx(
         min(t["val_mae"] for t in resultado["trials"])
     )
@@ -64,3 +65,23 @@ def test_otimiza_cnn_lstm_fim_a_fim(tmp_path):
         assert config_final[chave] == valor
     assert "modelo" in resultado["resultado_final"]["metricas"]
     json.dumps(resultado)  # saida precisa ser serializavel
+
+
+def test_otimiza_aceita_metrica_rmse(tmp_path):
+    # A busca pode minimizar RMSE em vez de MAE (--metrica-busca rmse).
+    csv = _csv_dateless(tmp_path, n=90)
+    config = TreinoConfig(
+        csv_path=str(csv),
+        cache_path=str(tmp_path / "cache.csv"),
+        arquitetura="cnn_lstm",
+        epocas=2,
+        paciencia_early_stopping=2,
+    )
+
+    resultado = otimiza(config, n_trials=2, metrica="rmse")
+
+    assert resultado["metrica_busca"] == "rmse"
+    # O valor otimizado continua sendo o menor entre os trials.
+    assert resultado["melhor_val_mae"] == pytest.approx(
+        min(t["val_mae"] for t in resultado["trials"])
+    )

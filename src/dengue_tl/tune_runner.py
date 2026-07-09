@@ -2,10 +2,11 @@
 
 Para cada trial, o Optuna (sampler TPE) sugere uma configuracao a partir do
 `espaco_busca` da arquitetura escolhida (ver dengue_tl.models), treina o modelo
-e mede o MAE **na validacao, em escala original de casos**. O conjunto de teste
-nunca entra na busca: ele so e usado uma vez, no retreino final com a melhor
-configuracao (via `treina_e_avalia`), para que a metrica reportada continue
-honesta.
+e mede o **MAE (ou RMSE, via `--metrica-busca`) na validacao, em escala original
+de casos**. RMSE pune mais os erros grandes (util quando o pico e o alvo). O
+conjunto de teste nunca entra na busca: ele so e usado uma vez, no retreino final
+com a melhor configuracao (via `treina_e_avalia`), para que a metrica reportada
+continue honesta.
 
 Os dados sao preparados uma unica vez (`prepara_dados`) e reutilizados por
 todos os trials. O `peso_pico` (peso de amostra) entra no `espaco_busca`, entao
@@ -24,7 +25,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from dengue_tl.paths import caminho_otimizacao, garante_pai
+from dengue_tl.paths import caminho_otimizacao, caminho_resultado, garante_pai
 from dengue_tl.train_runner import (
     DadosPreparados,
     SplitConfig,
@@ -33,12 +34,20 @@ from dengue_tl.train_runner import (
     pesos_por_nivel,
     prepara_dados,
     preve_casos,
+    rmse,
     treina_e_avalia,
 )
 
+# Metricas de validacao que a busca pode minimizar (ambas na escala de casos).
+METRICAS_BUSCA = {"mae": mae, "rmse": rmse}
 
-def _objetivo(trial, dados: DadosPreparados, config_base: TreinoConfig) -> float:
-    """Treina uma configuracao sugerida e retorna o MAE de validacao (escala original)."""
+
+def _objetivo(trial, dados: DadosPreparados, config_base: TreinoConfig, metrica_fn) -> float:
+    """Treina uma config sugerida e devolve a metrica de validacao (escala original).
+
+    `metrica_fn` e `mae` ou `rmse` (ver METRICAS_BUSCA); RMSE pune mais os erros
+    grandes (uteis quando o pico e o alvo), MAE trata todos os dias por igual.
+    """
     import keras
 
     from dengue_tl.models import seleciona_arquitetura
@@ -58,20 +67,27 @@ def _objetivo(trial, dados: DadosPreparados, config_base: TreinoConfig) -> float
     )
 
     y_pred = preve_casos(model, dados.x_val, dados.transformador, dados.hist_val)
-    return mae(dados.y_val_raw, y_pred)
+    return metrica_fn(dados.y_val_raw, y_pred)
 
 
-def otimiza(config_base: TreinoConfig, n_trials: int) -> dict[str, object]:
-    """Roda o estudo Optuna e retreina/avalia a melhor configuracao no teste."""
+def otimiza(
+    config_base: TreinoConfig, n_trials: int, metrica: str = "mae"
+) -> dict[str, object]:
+    """Roda o estudo Optuna e retreina/avalia a melhor configuracao no teste.
+
+    `metrica` ("mae" ou "rmse") e o objetivo minimizado na validacao.
+    """
     import optuna
 
+    metrica_fn = METRICAS_BUSCA[metrica]
     dados = prepara_dados(config_base)
 
     # Sampler com semente: a busca e reproduzivel dado o mesmo config/seed.
     sampler = optuna.samplers.TPESampler(seed=config_base.seed)
     study = optuna.create_study(direction="minimize", sampler=sampler)
     study.optimize(
-        lambda trial: _objetivo(trial, dados, config_base), n_trials=n_trials
+        lambda trial: _objetivo(trial, dados, config_base, metrica_fn),
+        n_trials=n_trials,
     )
 
     melhor_config = replace(config_base, **study.best_params)
@@ -80,7 +96,9 @@ def otimiza(config_base: TreinoConfig, n_trials: int) -> dict[str, object]:
     return {
         "arquitetura": config_base.arquitetura,
         "n_trials": n_trials,
+        "metrica_busca": metrica,
         "melhores_hiperparametros": study.best_params,
+        # Valor da metrica OTIMIZADA (mae ou rmse, conforme metrica_busca).
         "melhor_val_mae": float(study.best_value),
         "trials": [
             {
@@ -106,6 +124,12 @@ def _parse_args() -> argparse.Namespace:
         help="Arquitetura do modelo (cnn_lstm | cnn2d | mlp).",
     )
     parser.add_argument("--n-trials", type=int, default=50)
+    parser.add_argument(
+        "--metrica-busca",
+        default="mae",
+        choices=("mae", "rmse"),
+        help="Metrica de validacao minimizada na busca (rmse pune mais o pico).",
+    )
     parser.add_argument(
         "--cache-path",
         default="cache/tabela_lagged.csv",
@@ -175,12 +199,25 @@ def main() -> None:
             validacao_fracao=args.validacao_fracao,
         ),
     )
-    resultado = otimiza(config_base, n_trials=args.n_trials)
+    resultado = otimiza(config_base, n_trials=args.n_trials, metrica=args.metrica_busca)
     output = garante_pai(args.output_json or caminho_otimizacao(config_base.arquitetura))
     output.write_text(json.dumps(resultado, indent=2), encoding="utf-8")
+
+    # Grava tambem o resultado canonico (avaliacao final da melhor config) no
+    # caminho de resultado, para relatorios individuais e comparacao lerem o
+    # modelo TUNADO direto — sem depender de um run ad-hoc do experiment.
+    canonico = caminho_resultado(config_base.arquitetura)
+    garante_pai(canonico).write_text(
+        json.dumps(resultado["resultado_final"], indent=2), encoding="utf-8"
+    )
+
     print(f"Melhores hiperparametros: {resultado['melhores_hiperparametros']}")
-    print(f"MAE validacao do melhor trial: {resultado['melhor_val_mae']:.4f}")
+    print(
+        f"{args.metrica_busca.upper()} de validacao do melhor trial: "
+        f"{resultado['melhor_val_mae']:.4f}"
+    )
     print(f"Resultado salvo em: {output}")
+    print(f"Resultado canonico (tunado) em: {canonico}")
 
 
 if __name__ == "__main__":

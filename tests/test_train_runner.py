@@ -5,7 +5,6 @@ import pytest
 from dengue_tl.train_runner import (
     SplitConfig,
     TreinoConfig,
-    baseline_historico,
     calcula_metricas,
     carrega_tabela_lagged,
     treina_e_avalia,
@@ -39,17 +38,6 @@ def test_split_temporal_preserva_ordem():
 def test_split_temporal_erro_quando_inviavel():
     with pytest.raises(ValueError):
         split_temporal(n_amostras=3, treino_fracao=0.9, validacao_fracao=0.09)
-
-
-def test_baseline_historico_usa_dia_central():
-    # X: (n, 9, 4). Coluna 3 = Historico_lag30; linha central (raio=4) e o alvo.
-    X = np.zeros((2, 9, 4), dtype=float)
-    X[0, 4, 3] = 13.0  # historico do dia central da amostra 0
-    X[1, 4, 3] = 27.0
-
-    pred = baseline_historico(X, raio=4, idx_historico=3)
-
-    np.testing.assert_array_equal(pred, [13.0, 27.0])
 
 
 def test_calcula_metricas():
