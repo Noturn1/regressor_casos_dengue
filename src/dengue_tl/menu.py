@@ -23,12 +23,18 @@ from dataclasses import replace
 from pathlib import Path
 
 from dengue_tl.models import ARQUITETURAS
+from dengue_tl.paths import (
+    caminho_best_config,
+    caminho_otimizacao,
+    caminho_resultado,
+    garante_pai,
+)
 from dengue_tl.train_runner import SplitConfig, TreinoConfig
 
 CSV_DIR = Path("data")
 
 # Trials default por arquitetura (redes pequenas: treinam em segundos na CPU).
-TRIALS_DEFAULT = {"cnn_lstm": 50, "cnn2d": 50}
+TRIALS_DEFAULT = {"cnn_lstm": 50, "cnn2d": 50, "mlp": 50}
 
 
 # ---------------------------------------------------------------- prompts ----
@@ -85,14 +91,22 @@ def _escolhe_csv() -> str:
 
 
 def _escolhe_resultados() -> Path | None:
-    """Lista os JSONs de resultado do diretorio atual (mais recentes primeiro)."""
+    """Lista os JSONs de resultado em outputs/ (mais recentes primeiro)."""
+    from dengue_tl.paths import OUTPUTS_DIR
+
+    # Coleta resultado.json e otimizacao.json de cada subpasta de arquitetura.
+    _NOMES_RESULTADO = {"resultado.json", "otimizacao.json"}
     jsons = sorted(
-        Path(".").glob("resultados*.json"),
+        (
+            p
+            for p in OUTPUTS_DIR.glob("*/*.json")
+            if p.name in _NOMES_RESULTADO
+        ),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
     if not jsons:
-        caminho = _pergunta("Nenhum resultados*.json encontrado. Caminho do JSON")
+        caminho = _pergunta("Nenhum resultado encontrado em outputs/. Caminho do JSON")
         return Path(caminho) if caminho else None
     escolhido = _escolhe(
         "Qual arquivo de resultados usar? (mais recente primeiro)",
@@ -102,6 +116,41 @@ def _escolhe_resultados() -> Path | None:
 
 
 # ------------------------------------------------------------ construcao ----
+
+
+def _caminho_melhor_config(arquitetura: str) -> Path:
+    return caminho_best_config(arquitetura)
+
+
+def _salvar_melhor_config(arquitetura: str, hiperparametros: dict, val_mae: float) -> None:
+    from datetime import datetime
+
+    dados = {
+        "arquitetura": arquitetura,
+        "hiperparametros": hiperparametros,
+        "val_mae": val_mae,
+        "salvo_em": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    caminho = garante_pai(_caminho_melhor_config(arquitetura))
+    caminho.write_text(json.dumps(dados, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"Melhor config Optuna persistida em: {caminho}")
+
+
+def _oferecer_melhor_config(arquitetura: str) -> dict | None:
+    """Se existir config salva pelo Optuna, mostra e pergunta se quer usar."""
+    caminho = _caminho_melhor_config(arquitetura)
+    if not caminho.exists():
+        return None
+    dados = _carrega_json(caminho)
+    if dados is None:
+        return None
+    print(f"\nMelhor config Optuna encontrada ({dados.get('salvo_em', '?')}):")
+    print(f"  val MAE: {dados['val_mae']:.4f}")
+    for chave, valor in dados["hiperparametros"].items():
+        print(f"  {chave} = {valor}")
+    if _confirma("Usar esta configuracao?"):
+        return dados["hiperparametros"]
+    return None
 
 
 def _config_interativa(arquitetura: str) -> TreinoConfig:
@@ -158,8 +207,15 @@ def _resultado_para_relatorio(caminho: Path) -> Path | None:
 
 def acao_treinar() -> None:
     arquitetura = _escolhe("Qual arquitetura treinar?", list(ARQUITETURAS))
-    config = _config_interativa(arquitetura)
-    output = Path(_pergunta("Salvar resultado em", f"resultados_{arquitetura}.json"))
+    melhor = _oferecer_melhor_config(arquitetura)
+    if melhor is not None:
+        csv = _escolhe_csv()
+        config = replace(TreinoConfig(csv_path=csv, arquitetura=arquitetura), **melhor)
+    else:
+        config = _config_interativa(arquitetura)
+    output = garante_pai(
+        _pergunta("Salvar resultado em", str(caminho_resultado(arquitetura)))
+    )
 
     from dengue_tl.experiment import formata_resumo, roda_experimento
 
@@ -181,8 +237,8 @@ def acao_otimizar() -> None:
     )
     config = _config_interativa(arquitetura)
     n_trials = _pergunta_int("Numero de trials", TRIALS_DEFAULT[arquitetura])
-    output = Path(
-        _pergunta("Salvar resultado em", f"resultados_otimizacao_{arquitetura}.json")
+    output = garante_pai(
+        _pergunta("Salvar resultado em", str(caminho_otimizacao(arquitetura)))
     )
 
     from dengue_tl.experiment import formata_resumo, resumo_pertinente
@@ -194,6 +250,10 @@ def acao_otimizar() -> None:
         json.dumps(resultado, indent=2, ensure_ascii=False), encoding="utf-8"
     )
 
+    _salvar_melhor_config(
+        arquitetura, resultado["melhores_hiperparametros"], resultado["melhor_val_mae"]
+    )
+
     print("\nMelhores hiperparametros:")
     for chave, valor in resultado["melhores_hiperparametros"].items():
         print(f"  {chave} = {valor}")
@@ -202,7 +262,8 @@ def acao_otimizar() -> None:
     print(f"\nResultado completo salvo em: {output}")
 
 
-def _gera_relatorio(csv: str, resultados: Path) -> None:
+def _gera_relatorio(csv: str, resultados: Path) -> str | None:
+    """Gera artefatos de um modelo. Retorna o output_dir usado, ou None em erro."""
     try:
         from dengue_tl.report.artifacts import save_all_report_artifacts
         from dengue_tl.report.data_io import DEFAULT_OUTPUT_DIR
@@ -211,16 +272,55 @@ def _gera_relatorio(csv: str, resultados: Path) -> None:
             "Modulo de relatorio indisponivel — instale os extras: "
             'venv/bin/pip install -e ".[report]"'
         )
-        return
+        return None
 
     caminho = _resultado_para_relatorio(resultados)
     if caminho is None:
-        return
+        return None
     output_dir = _pergunta("Pasta de saida", str(DEFAULT_OUTPUT_DIR))
     artefatos = save_all_report_artifacts(
         csv_path=csv, results_path=caminho, output_dir=output_dir
     )
     print("\nArtefatos gerados:")
+    for nome, caminho_artefato in artefatos.items():
+        print(f"- {nome}: {caminho_artefato}")
+    return output_dir
+
+
+def _gera_comparacao(csv: str, output_dir: str) -> None:
+    """Gera tabela + gráfico comparativo entre as arquiteturas com resultados disponíveis."""
+    try:
+        from dengue_tl.report.artifacts import save_comparison_artifacts
+    except ImportError:
+        print("Modulo de relatorio indisponivel.")
+        return
+
+    # Prefere resultado.json (treino direto); cai em otimizacao.json se nao houver.
+    caminhos: dict[str, Path] = {}
+    for arq in ARQUITETURAS:
+        resultado = caminho_resultado(arq)
+        otimizacao = caminho_otimizacao(arq)
+        if resultado.exists():
+            caminhos[arq.upper().replace("_", "-")] = resultado
+        elif otimizacao.exists():
+            caminhos[arq.upper().replace("_", "-")] = otimizacao
+
+    if len(caminhos) < 2:
+        disponiveis = [arq for arq in ARQUITETURAS if caminho_resultado(arq).exists() or caminho_otimizacao(arq).exists()]
+        print(f"Comparativo requer ao menos 2 arquiteturas com resultados. Disponíveis: {disponiveis or 'nenhuma'}")
+        return
+
+    print("\nArquiteturas para comparacao:")
+    for label, p in caminhos.items():
+        print(f"  {label}: {p}")
+
+    if not _confirma("Gerar comparativo?"):
+        return
+
+    artefatos = save_comparison_artifacts(
+        csv_path=csv, results_paths=caminhos, output_dir=output_dir
+    )
+    print("\nArtefatos comparativos:")
     for nome, caminho_artefato in artefatos.items():
         print(f"- {nome}: {caminho_artefato}")
 
@@ -230,7 +330,9 @@ def acao_relatorio() -> None:
     if resultados is None:
         return
     csv = _escolhe_csv()
-    _gera_relatorio(csv=csv, resultados=resultados)
+    output_dir = _gera_relatorio(csv=csv, resultados=resultados)
+    if output_dir and _confirma("Gerar comparativo CNN-LSTM vs CNN2D?", default=False):
+        _gera_comparacao(csv=csv, output_dir=output_dir)
 
 
 def acao_ver_resumo() -> None:
@@ -271,7 +373,7 @@ ACOES = [
 
 def main() -> None:
     print("=" * 56)
-    print("Dengue 9x4 — estimativa de casos (CNN-LSTM / CNN2D)")
+    print("Dengue 9x4 — estimativa de casos (CNN-LSTM / CNN2D / MLP)")
     print("=" * 56)
     while True:
         print("\nO que voce quer fazer?")

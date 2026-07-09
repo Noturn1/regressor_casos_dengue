@@ -194,6 +194,37 @@ def build_error_by_range_table(results: dict[str, Any]) -> pd.DataFrame:
     return pd.DataFrame(linhas)
 
 
+def build_comparison_table(entries: list[tuple[str, dict[str, Any]]]) -> pd.DataFrame:
+    """Tabela unificada de métricas: arquiteturas e baselines em linhas.
+
+    `entries` é uma lista de `(label, results_dict)` — um por modelo.
+    Os baselines são extraídos do primeiro entry (assumem-se iguais).
+    """
+    linhas = []
+    for label, results in entries:
+        modelo = results.get("metricas", {}).get("modelo", {})
+        linhas.append({
+            "metodo": label,
+            "MAE": modelo.get("mae", np.nan),
+            "RMSE": modelo.get("rmse", np.nan),
+            "CC": modelo.get("cc", np.nan),
+        })
+
+    if entries:
+        metricas = entries[0][1].get("metricas", {})
+        for nome in ("baseline_media", "baseline_historico", "baseline_ultimo_vizinho"):
+            v = metricas.get(nome)
+            if v:
+                linhas.append({
+                    "metodo": nome.replace("_", " "),
+                    "MAE": v.get("mae", np.nan),
+                    "RMSE": v.get("rmse", np.nan),
+                    "CC": v.get("cc", np.nan),
+                })
+
+    return pd.DataFrame(linhas)
+
+
 def save_table(df: pd.DataFrame, path: Path) -> Path:
     """Salva um DataFrame em CSV."""
     df.to_csv(path, index=False)

@@ -10,9 +10,11 @@ from typing import Any, NamedTuple
 import numpy as np
 import pandas as pd
 
+from dengue_tl.paths import OUTPUTS_DIR
 from dengue_tl.series_loader import repara_valores_numericos
 
-DEFAULT_OUTPUT_DIR = Path("relatorio_outputs")
+# Base dos relatorios: outputs/ (o report acrescenta <arquitetura>/relatorio).
+DEFAULT_OUTPUT_DIR = OUTPUTS_DIR
 DEFAULT_DPI = 220
 
 
@@ -83,6 +85,29 @@ def extract_test_predictions(results: dict[str, Any]) -> TestPredictions:
         dtype=float,
     )
     return TestPredictions(y_true, y_model, y_media, y_hist)
+
+
+def test_date_axis(results: dict[str, Any]) -> pd.DatetimeIndex | None:
+    """Reconstrói o eixo de datas do conjunto de teste a partir do config.
+
+    Amostra 0 do windower = dia (lag_clima + raio) da série original contada a
+    partir de data_inicial; cada sample i → data_inicial + (offset + i) dias.
+    Retorna None quando data_inicial não está disponível no config.
+    """
+    config = results.get("config", {})
+    data_inicial = config.get("data_inicial")
+    if not data_inicial:
+        return None
+    lag_clima = int(config.get("lag_clima", 45))
+    raio = int(config.get("raio", 4))
+    split = results.get("split", {})
+    teste_inicio = int(split.get("teste", [0, 0])[0])
+    n_teste = len(results.get("predicoes_teste", {}).get("y_true", []))
+    if n_teste == 0:
+        return None
+    offset = lag_clima + raio
+    primeiro_dia = pd.Timestamp(data_inicial) + pd.Timedelta(days=offset + teste_inicio)
+    return pd.date_range(start=primeiro_dia, periods=n_teste, freq="D")
 
 
 def ensure_output_dir(output_dir: str | Path) -> Path:
