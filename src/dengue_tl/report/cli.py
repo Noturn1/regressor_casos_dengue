@@ -62,6 +62,8 @@ def main() -> None:
                 f"Encontradas: {sorted(resultados) or 'nenhuma'}."
             )
             return
+        from dengue_tl.report.comparacao import gera_comparacao_completa
+
         artefatos = save_comparison_artifacts(
             csv_path=args.csv,
             results_paths=resultados,
@@ -69,6 +71,8 @@ def main() -> None:
             date_column=args.date_column,
             dpi=args.dpi,
         )
+        # Tabela rica (erro por faixa, amplitude, ganho) + predicoes + graficos.
+        artefatos.update(gera_comparacao_completa(output_dir=args.output_dir, dpi=args.dpi))
         print(f"Comparando: {', '.join(sorted(resultados))}")
     elif args.results:
         artefatos = save_all_report_artifacts(
