@@ -19,7 +19,7 @@ não puxa TensorFlow; só a arquitetura escolhida carrega Keras.
 
 from __future__ import annotations
 
-ARQUITETURAS = ("cnn_lstm", "cnn2d")
+ARQUITETURAS = ("cnn_lstm", "cnn2d", "mlp")
 
 
 def seleciona_arquitetura(nome: str):
@@ -32,6 +32,10 @@ def seleciona_arquitetura(nome: str):
         from dengue_tl.models import cnn2d
 
         return cnn2d
+    if nome == "mlp":
+        from dengue_tl.models import mlp
+
+        return mlp
     raise ValueError(
         f"Arquitetura desconhecida: {nome!r}. Opções: {', '.join(ARQUITETURAS)}."
     )
