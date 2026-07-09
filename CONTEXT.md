@@ -4,7 +4,7 @@ Trabalho de disciplina: estimar o número de casos de dengue de um dia a partir 
 dados estruturados ao redor desse dia (uma janela 9×4), com redes convolucionais/
 recorrentes pequenas. Aplicado a Cascavel-PR. Reaproveita parte do código de uma
 Iniciação Científica, mas com escopo próprio (ver `roteiro.md`). As arquiteturas
-avaliadas são **CNN-LSTM** e **CNN2D** (e um MLP a ser adicionado).
+avaliadas são **CNN-LSTM**, **CNN2D** e um **MLP** baseline.
 
 ## Vocabulário
 
@@ -23,7 +23,7 @@ de 1 em 1 dia. Empilhada, vira uma **matriz 9×4** (9 dias × 4 features). O alv
 codificação em imagem — os dados são estruturados/multivariados, então a geometria
 9×4 é a forma natural do bloco e preserva as 4 features. Cada arquitetura só adapta
 o formato em `prepara_entrada` (CNN-LSTM: `(9, 4)` direto; CNN2D: transposta para
-`(4, 9, 1)`).
+`(4, 9, 1)`; MLP: colapsa para a linha central `(4,)`).
 
 **Arquitetura padrão**: CNN-LSTM — duas `Conv1D` + `LSTM` sobre a janela `(9, 4)` diretamente. Rede minúscula (poucos milhares de parâmetros), treina em segundos na CPU. Seleção via `--arquitetura` em `experiment.py`.
 
@@ -31,6 +31,13 @@ o formato em `prepara_entrada` (CNN-LSTM: `(9, 4)` direto; CNN2D: transposta par
 `(4, 9, 1)` — Conv2D(32)→Conv2D(64), kernels 2×2 `same`, Flatten, Dense(64), Dense(1).
 Sem pooling (entrada minúscula) e sem codificação em imagem. A spec original não tem
 dropout (`--dropout 0` a reproduz exatamente).
+
+**Arquitetura mlp** (baseline mais simples): MLP denso sobre APENAS as 4 features
+defasadas do dia `t` — ignora a janela de vizinhos. Duas `Dense(unidades)`→ReLU
+(com dropout opcional) e `Dense(1)`. O pipeline ainda entrega a janela `(n, 9, 4)`;
+`prepara_entrada` colapsa para a linha central `(n, 4)`, garantindo o mesmo split e
+o mesmo conjunto de amostras que cnn2d/cnn_lstm (comparação justa). É o contraste:
+se a janela ajuda, cnn2d/cnn_lstm devem superar este MLP.
 
 **Formulação do alvo** (padrão desde jul/2026): o modelo aprende a **log-razão**
 `log1p(casos) − log1p(Historico_lag30)` — o crescimento em ~30 dias — em vez do nível
