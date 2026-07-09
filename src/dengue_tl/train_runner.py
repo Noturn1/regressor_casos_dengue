@@ -65,10 +65,11 @@ class TreinoConfig:
     # de registro, nao sinal. 0 ou 1 desativam.
     suavizacao_alvo: int = 7
     # Sazonalidade: adiciona sin/cos do dia-do-ano do dia central como features
-    # (ver LaggedTableConfig). Ligado por padrao — a dengue e fortemente sazonal
-    # (jan-mai concentra ~94% dos casos) e o calendario e futuro conhecido, nao
-    # vazamento.
-    sazonalidade: bool = True
+    # (ver LaggedTableConfig). DESLIGADO por padrao (decisao metodologica): dar o
+    # calendario deixa o modelo memorizar o atalho sazonal ("e marco -> pico") em
+    # vez de aprender a relacao clima->casos, que e o objetivo do trabalho. O
+    # clima ja carrega a estacao. Fica como opcao de ablation (--sazonalidade).
+    sazonalidade: bool = False
     data_inicial: str = "2007-01-01"
     # Peso de pico: cada dia de treino recebe peso 1 + peso_pico*(nivel/nivel_max)
     # na loss, priorizando acertar a AMPLITUDE dos dias de alto numero de casos
@@ -490,8 +491,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--sazonalidade",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Adiciona sin/cos do dia-do-ano como features (--no-sazonalidade desativa).",
+        default=False,
+        help="Ablation: adiciona sin/cos do dia-do-ano como features (desligado por padrao).",
     )
     parser.add_argument(
         "--data-inicial",
