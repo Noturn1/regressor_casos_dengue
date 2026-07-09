@@ -25,7 +25,12 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from dengue_tl.paths import caminho_otimizacao, caminho_resultado, garante_pai
+from dengue_tl.paths import (
+    caminho_otimizacao,
+    caminho_resultado,
+    garante_pai,
+    rotulo_de,
+)
 from dengue_tl.train_runner import (
     DadosPreparados,
     SplitConfig,
@@ -123,6 +128,12 @@ def _parse_args() -> argparse.Namespace:
         default="cnn_lstm",
         help="Arquitetura do modelo (cnn_lstm | cnn2d | mlp).",
     )
+    parser.add_argument(
+        "--rotulo",
+        default="",
+        help="Pasta de saida (outputs/<rotulo>/); vazio usa a arquitetura. "
+        "Separa variantes da mesma arquitetura (ex.: cnn_lstm sequencia).",
+    )
     parser.add_argument("--n-trials", type=int, default=50)
     parser.add_argument(
         "--metrica-busca",
@@ -182,6 +193,7 @@ def main() -> None:
         csv_path=args.csv,
         cache_path=args.cache_path,
         arquitetura=args.arquitetura,
+        rotulo=args.rotulo,
         lag_clima=args.lag_clima,
         lag_historico=args.lag_historico,
         sazonalidade=args.sazonalidade,
@@ -200,13 +212,14 @@ def main() -> None:
         ),
     )
     resultado = otimiza(config_base, n_trials=args.n_trials, metrica=args.metrica_busca)
-    output = garante_pai(args.output_json or caminho_otimizacao(config_base.arquitetura))
+    rotulo = rotulo_de(config_base.arquitetura, config_base.rotulo)
+    output = garante_pai(args.output_json or caminho_otimizacao(rotulo))
     output.write_text(json.dumps(resultado, indent=2), encoding="utf-8")
 
     # Grava tambem o resultado canonico (avaliacao final da melhor config) no
     # caminho de resultado, para relatorios individuais e comparacao lerem o
     # modelo TUNADO direto — sem depender de um run ad-hoc do experiment.
-    canonico = caminho_resultado(config_base.arquitetura)
+    canonico = caminho_resultado(rotulo)
     garante_pai(canonico).write_text(
         json.dumps(resultado["resultado_final"], indent=2), encoding="utf-8"
     )

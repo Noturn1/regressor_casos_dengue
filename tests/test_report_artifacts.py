@@ -96,6 +96,22 @@ def test_save_all_separa_saida_por_arquitetura(tmp_path):
         assert caminho.parent == saida / "cnn_lstm" / "relatorio"
 
 
+def test_save_all_usa_rotulo_quando_presente(tmp_path):
+    # Rotulo custom separa variantes da mesma arquitetura (ex.: cnn_lstm seq).
+    csv_path, results_path = _prepara_entradas(tmp_path)
+    resultados = json.loads(results_path.read_text())
+    resultados["config"]["rotulo"] = "cnn_lstm_sequencia"
+    results_path.write_text(json.dumps(resultados))
+    saida = tmp_path / "saida"
+
+    artefatos = save_all_report_artifacts(
+        csv_path, results_path, output_dir=saida, dpi=60
+    )
+
+    for caminho in artefatos.values():
+        assert caminho.parent == saida / "cnn_lstm_sequencia" / "relatorio"
+
+
 def test_save_all_usa_pasta_modelo_sem_arquitetura_no_json(tmp_path):
     csv_path, results_path = _prepara_entradas(tmp_path)
     resultados = json.loads(results_path.read_text())

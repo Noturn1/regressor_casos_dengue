@@ -20,7 +20,7 @@ import argparse
 import json
 from pathlib import Path
 
-from dengue_tl.paths import caminho_resultado, garante_pai
+from dengue_tl.paths import caminho_resultado, garante_pai, rotulo_de
 from dengue_tl.train_runner import (
     SplitConfig,
     TreinoConfig,
@@ -166,6 +166,12 @@ def _parse_args() -> argparse.Namespace:
         default="cnn_lstm",
         help="Arquitetura do modelo (cnn_lstm | cnn2d | mlp).",
     )
+    parser.add_argument(
+        "--rotulo",
+        default="",
+        help="Pasta de saida (outputs/<rotulo>/); vazio usa a arquitetura. "
+        "Separa variantes da mesma arquitetura (ex.: cnn_lstm sequencia).",
+    )
     parser.add_argument("--cache-path", default="cache/tabela_lagged.csv")
     parser.add_argument("--lag-clima", type=int, default=45)
     parser.add_argument("--lag-historico", type=int, default=30)
@@ -241,6 +247,7 @@ def main() -> None:
         csv_path=args.csv,
         cache_path=args.cache_path,
         arquitetura=args.arquitetura,
+        rotulo=args.rotulo,
         lag_clima=args.lag_clima,
         lag_historico=args.lag_historico,
         raio=args.raio,
@@ -271,7 +278,10 @@ def main() -> None:
 
     print(formata_resumo(resultado["resumo"]))
 
-    saida = garante_pai(args.output_json or caminho_resultado(args.arquitetura))
+    saida = garante_pai(
+        args.output_json
+        or caminho_resultado(rotulo_de(config.arquitetura, config.rotulo))
+    )
     saida.write_text(json.dumps(resultado, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"\nResultado completo salvo em: {saida}")
 

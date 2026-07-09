@@ -21,6 +21,15 @@ from pathlib import Path
 OUTPUTS_DIR = Path("outputs")
 
 
+def rotulo_de(arquitetura: str, rotulo: str = "") -> str:
+    """Nome da pasta de saida: o `rotulo` custom, ou a `arquitetura` por padrao.
+
+    Permite separar duas variantes da MESMA arquitetura (ex.: cnn_lstm lagged vs
+    sequencia) em pastas distintas, evitando que uma sobrescreva a outra.
+    """
+    return rotulo or arquitetura
+
+
 def dir_arquitetura(arquitetura: str) -> Path:
     return OUTPUTS_DIR / arquitetura
 
