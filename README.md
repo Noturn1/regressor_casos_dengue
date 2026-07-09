@@ -40,7 +40,7 @@ data/
 ```bash
 venv/bin/python -m dengue_tl.experiment --csv "data/Dados 2007-2024.csv"
 # padrão: cnn_lstm; para a CNN2D: --arquitetura cnn2d
-# gera cache/tabela_lagged.csv e resultados_experimento.json (métricas + predições + resumo)
+# gera cache/tabela_lagged.csv e outputs/<arquitetura>/resultado.json (métricas + predições + resumo)
 # sazonalidade (dia-do-ano) é ablation opt-in: --sazonalidade (desligada por padrão)
 ```
 

@@ -14,14 +14,14 @@ ARTEFATOS_ESPERADOS = {
     "tabela_split_temporal",
     "tabela_metricas_modelos",
     "tabela_erro_por_faixa",
-    "grafico_serie_casos",
     "grafico_variaveis_originais",
-    "grafico_real_vs_previsto",
     "grafico_modelo_vs_baselines",
     "grafico_metricas_comparativas",
-    "grafico_dispersao_real_previsto",
     "grafico_residuos",
     "grafico_erro_por_faixa",
+    "grafico_curvas_aprendizado",
+    "grafico_residuos_no_tempo",
+    "grafico_distribuicao_treino_teste",
 }
 
 
@@ -93,7 +93,7 @@ def test_save_all_separa_saida_por_arquitetura(tmp_path):
     )
 
     for caminho in artefatos.values():
-        assert caminho.parent == saida / "cnn_lstm"
+        assert caminho.parent == saida / "cnn_lstm" / "relatorio"
 
 
 def test_save_all_usa_pasta_modelo_sem_arquitetura_no_json(tmp_path):
@@ -108,7 +108,7 @@ def test_save_all_usa_pasta_modelo_sem_arquitetura_no_json(tmp_path):
     )
 
     for caminho in artefatos.values():
-        assert caminho.parent == saida / "modelo"
+        assert caminho.parent == saida / "modelo" / "relatorio"
 
 
 def test_save_all_repara_valores_corrompidos_na_estrutura(tmp_path):
