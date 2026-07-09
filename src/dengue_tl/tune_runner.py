@@ -25,7 +25,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from dengue_tl.paths import caminho_otimizacao, garante_pai
+from dengue_tl.paths import caminho_otimizacao, caminho_resultado, garante_pai
 from dengue_tl.train_runner import (
     DadosPreparados,
     SplitConfig,
@@ -202,12 +202,22 @@ def main() -> None:
     resultado = otimiza(config_base, n_trials=args.n_trials, metrica=args.metrica_busca)
     output = garante_pai(args.output_json or caminho_otimizacao(config_base.arquitetura))
     output.write_text(json.dumps(resultado, indent=2), encoding="utf-8")
+
+    # Grava tambem o resultado canonico (avaliacao final da melhor config) no
+    # caminho de resultado, para relatorios individuais e comparacao lerem o
+    # modelo TUNADO direto — sem depender de um run ad-hoc do experiment.
+    canonico = caminho_resultado(config_base.arquitetura)
+    garante_pai(canonico).write_text(
+        json.dumps(resultado["resultado_final"], indent=2), encoding="utf-8"
+    )
+
     print(f"Melhores hiperparametros: {resultado['melhores_hiperparametros']}")
     print(
         f"{args.metrica_busca.upper()} de validacao do melhor trial: "
         f"{resultado['melhor_val_mae']:.4f}"
     )
     print(f"Resultado salvo em: {output}")
+    print(f"Resultado canonico (tunado) em: {canonico}")
 
 
 if __name__ == "__main__":
