@@ -17,3 +17,5 @@ outputs/
 resultados_*.json
 best_hiperparametros_*.json
 relatorio_outputs/
+# Figuras/tabelas curadas para o relatorio (regeneraveis a partir de outputs/).
+para_relatorio/
