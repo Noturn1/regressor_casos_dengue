@@ -69,19 +69,36 @@ def build_data_structure_table(
 
 
 def build_pipeline_config_table(results: dict[str, Any]) -> pd.DataFrame:
-    """Resume os principais parâmetros do pipeline a partir do JSON do treino."""
-    config = results.get("config", {})
-    raio = int(config.get("raio", 4))
-    lag_clima = int(config.get("lag_clima", 45))
-    lag_historico = int(config.get("lag_historico", 30))
-    janela = 2 * raio + 1
+    """Resume os principais parâmetros do pipeline a partir do JSON do treino.
 
-    linhas = [
-        ("lag_clima", lag_clima),
-        ("lag_historico", lag_historico),
-        ("raio", raio),
-        ("tamanho_da_janela", janela),
-        ("shape_matriz_entrada", f"({janela}, 4)"),
+    O shape da entrada depende do modo: `lagged` empilha `2*raio+1` linhas de 4
+    features defasadas; `sequencia` usa `janela_dias` dias brutos terminando em
+    `t-gap_dias`. Deriva tudo do config (não crava um shape fixo).
+    """
+    config = results.get("config", {})
+    arquitetura = config.get("arquitetura", "?")
+    modo = config.get("modo", "lagged")
+
+    linhas: list[tuple[str, Any]] = [("arquitetura", arquitetura), ("modo", modo)]
+    if modo == "sequencia":
+        janela = int(config.get("janela_dias", 60))
+        gap = int(config.get("gap_dias", 30))
+        linhas += [
+            ("janela_dias", janela),
+            ("gap_dias", gap),
+            ("shape_matriz_entrada", f"({janela}, 4)"),
+        ]
+    else:
+        raio = int(config.get("raio", 4))
+        janela = 2 * raio + 1
+        linhas += [
+            ("lag_clima", int(config.get("lag_clima", 45))),
+            ("lag_historico", int(config.get("lag_historico", 30))),
+            ("raio", raio),
+            ("tamanho_da_janela", janela),
+            ("shape_matriz_entrada", f"({janela}, 4)"),
+        ]
+    linhas += [
         ("metricas_usadas", "MAE, RMSE, CC"),
         ("baselines_usados", "baseline_media, baseline_historico"),
     ]

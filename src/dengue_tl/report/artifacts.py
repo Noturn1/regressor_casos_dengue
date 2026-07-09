@@ -107,6 +107,30 @@ def save_all_report_artifacts(
     return artefatos
 
 
+def descobre_resultados_por_arquitetura(
+    base: str | Path = DEFAULT_OUTPUT_DIR,
+) -> dict[str, Path]:
+    """Mapeia `arquitetura -> caminho do melhor resultado` varrendo `outputs/`.
+
+    Prefere `otimizacao.json` (resultado tunado, robusto a runs ad-hoc que
+    sobrescrevem `resultado.json`) e cai para `resultado.json`. Ignora a pasta
+    `comparacao`. Usado pelo `--comparar` do report.
+    """
+    base = Path(base)
+    achados: dict[str, Path] = {}
+    if not base.exists():
+        return achados
+    for sub in sorted(base.iterdir()):
+        if not sub.is_dir() or sub.name == "comparacao":
+            continue
+        for nome in ("otimizacao.json", "resultado.json"):
+            candidato = sub / nome
+            if candidato.exists():
+                achados[sub.name] = candidato
+                break
+    return achados
+
+
 def save_comparison_artifacts(
     csv_path: str | Path,
     results_paths: dict[str, str | Path],

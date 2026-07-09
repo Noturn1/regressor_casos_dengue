@@ -180,15 +180,6 @@ def baseline_media(y_treino: np.ndarray, tamanho: int) -> np.ndarray:
     return np.full(shape=(tamanho,), fill_value=float(np.mean(y_treino)), dtype=float)
 
 
-def baseline_historico(X: np.ndarray, raio: int, idx_historico: int) -> np.ndarray:
-    """Baseline de persistencia: usa o historico de casos (t-30) do dia central.
-
-    E o valor de casos mais recente disponivel como feature; um estimador
-    ingenuo honesto para `Qtde_Casos[t]`.
-    """
-    return X[:, raio, idx_historico].astype(float)
-
-
 def mae(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(np.mean(np.abs(y_true - y_pred)))
 
