@@ -50,22 +50,24 @@ na escala original**. O teste nunca entra na busca: só é usado uma vez, no ret
 com a melhor configuração. Os dados são preparados uma única vez (`prepara_dados`) e
 reutilizados por todos os trials.
 
-**Sazonalidade** (padrão desde jul/2026): a dengue em Cascavel é fortemente
-sazonal — jan–mai concentra ~94% dos casos, com pico em mar–abr e ~0 de jul–dez.
-Como o dataset é dateless mas diário e contíguo, o calendário é reconstruível
-exatamente (6575 linhas = 2007-01-01…2024-12-31). Codifica-se o **dia-do-ano do
-dia central** `t` como par `sin_ano`/`cos_ano` (período 365.25; o par evita a
-descontinuidade 31/dez→1/jan) e ele entra como **duas features extras** na matriz
-(9×4 → 9×6). **Não é vazamento**: o calendário é conhecido de antemão para
-qualquer data — feature exógena de futuro conhecido, diferente das variáveis de
-caso/clima, que exigem lag. Ligado por padrão (`LaggedTableConfig.sazonalidade`
-default é `False` para preservar o contrato básico da tabela; `TreinoConfig`
-liga). Flags: `--no-sazonalidade` desativa; `--data-inicial` fixa a data-base do
-calendário para séries dateless. O cache ganha sufixo `_sazonal` para não reusar
-silenciosamente uma tabela de 4 features. **Efeito observado**: sobe a correlação
-de forma consistente (o modelo passa a enxergar a fase do ano); converter isso em
-ganho de MAE exige **re-tunar os hiperparâmetros** (os antigos foram buscados
-sobre 4 features).
+**Sazonalidade** (ablation, **DESLIGADA por padrão** desde jul/2026): a dengue em
+Cascavel é fortemente sazonal — jan–mai concentra ~94% dos casos. Dá para dar essa
+fase ao modelo codificando o **dia-do-ano do dia central** `t` como par
+`sin_ano`/`cos_ano` (período 365.25; o par evita a descontinuidade 31/dez→1/jan),
+que entra como **duas features extras** na matriz (9×4 → 9×6). O calendário é
+reconstruível exatamente (6575 linhas = 2007-01-01…2024-12-31, série dateless mas
+contígua). **Não é vazamento** (o calendário é futuro conhecido), mas é uma
+**decisão metodológica mantê-la desligada**: dar a data deixa o modelo memorizar o
+atalho sazonal ("é março → pico") em vez de aprender a relação clima→casos — que é
+o objetivo do trabalho, e o clima já carrega a estação. Fica como **ablation**
+(`--sazonalidade` liga; `LaggedTableConfig`/`TreinoConfig` default `False`;
+`--data-inicial` fixa a data-base). O cache ganha sufixo `_sazonal` quando ligada,
+para não reusar silenciosamente uma tabela de 4 features. **Efeito medido**
+(re-tune justo, 40 trials): com a data, MAE cai muito (cnn2d 29.6→22.5, cnn_lstm
+29.2→24.2) e o pico destrava — mas **removê-la volta as duas ao ~29.5 (≈ o
+original)**, ou seja, o ganho vinha do atalho sazonal, exatamente o que a decisão
+evita. A ponderação de pico **só rende junto com a data** (sozinha não bate o
+original).
 
 **Peso de pico** (`peso_pico`, default `0.0` = desligado): o erro do modelo se
 concentra nos poucos dias de pico epidêmico (que dominam MAE/RMSE na escala de
@@ -78,9 +80,13 @@ Entra no `espaco_busca` das duas arquiteturas (faixa 0–8), então o Optuna tes
 diferentes intensidades por trial: o `sample_weight` é recalculado a cada treino
 a partir do `nivel_treino` guardado em `DadosPreparados` (barato), em vez de fixo
 na preparação. Também dá para forçar um valor com `--peso-pico`. Ver
-`train_runner.pesos_por_nivel`. **Efeito observado** (cnn2d, re-tunado com
-sazonalidade): MAE de teste 29→22, RMSE 77→66, predição máxima ~240→409 (destrava
-a amplitude do pico).
+`train_runner.pesos_por_nivel`. **Efeito observado**: destrava a amplitude do pico
+(cnn2d COM sazonalidade: MAE 29→22, RMSE 77→66, predição máxima ~240→409). **Mas
+depende da data**: sem a sazonalidade a ponderação sozinha não bate o original (o
+modelo não sabe *quando* alocar amplitude). Com a sazonalidade off por padrão, o
+`peso_pico` continua no `espaco_busca`, mas o Optuna tende a escolher valores que
+não ajudam no teste — o objetivo de validação descola do teste sob regime de
+surto maior (gargalo em aberto, ver item "validação↔teste").
 
 ## Fatos dos dados
 

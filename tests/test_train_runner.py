@@ -83,11 +83,12 @@ def test_carrega_tabela_lagged_dateless_sem_sazonalidade(tmp_path):
 
 
 def test_carrega_tabela_lagged_sazonal_usa_cache_sufixado(tmp_path):
-    # Com sazonalidade (default), o cache ganha sufixo _sazonal para nao reusar
-    # silenciosamente uma tabela de 4 features, e as colunas ganham sin/cos.
+    # Com sazonalidade (ablation, desligada por padrao), o cache ganha sufixo
+    # _sazonal para nao reusar silenciosamente uma tabela de 4 features, e as
+    # colunas ganham sin/cos.
     csv = _csv_dateless(tmp_path, n=60)
     cache = tmp_path / "cache" / "tabela.csv"
-    config = TreinoConfig(csv_path=str(csv), cache_path=str(cache))
+    config = TreinoConfig(csv_path=str(csv), cache_path=str(cache), sazonalidade=True)
 
     tabela = carrega_tabela_lagged(config)
 
