@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "dengue-tl"
 version = "0.1.0"
-description = "Estimativa de casos de dengue com redes convolucionais/recorrentes (CNN-LSTM, CNN2D)"
+description = "Estimativa de casos de dengue: comparacao MLP / CNN2D / CNN-LSTM sob avaliacao honesta"
 requires-python = ">=3.11"
 dependencies = [
     "numpy",
