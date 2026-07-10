@@ -49,8 +49,10 @@ def save_all_report_artifacts(
     """
     raw_df = load_raw_dataset(csv_path, date_column=date_column)
     results = load_training_results(results_path)
-    arquitetura = str(results.get("config", {}).get("arquitetura") or "modelo")
-    output = ensure_output_dir(Path(output_dir) / arquitetura / "relatorio")
+    config = results.get("config", {})
+    # Pasta pelo rotulo (ou arquitetura), consistente com dengue_tl.paths.
+    rotulo = str(config.get("rotulo") or config.get("arquitetura") or "modelo")
+    output = ensure_output_dir(Path(output_dir) / rotulo / "relatorio")
 
     metrics_df = build_metrics_table(results)
     error_df = build_error_by_range_table(results)

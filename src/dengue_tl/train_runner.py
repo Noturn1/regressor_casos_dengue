@@ -30,7 +30,7 @@ from dengue_tl.matrix_windower import (
     build_matrix_windows,
     feature_columns,
 )
-from dengue_tl.paths import caminho_resultado, garante_pai
+from dengue_tl.paths import caminho_resultado, garante_pai, rotulo_de
 from dengue_tl.scaler import Scaler
 
 
@@ -45,6 +45,11 @@ class TreinoConfig:
     csv_path: str
     cache_path: str = "cache/tabela_lagged.csv"
     arquitetura: str = "cnn_lstm"  # ver dengue_tl.models.ARQUITETURAS
+    # Rotulo da pasta de saida (outputs/<rotulo>/). Vazio => usa a arquitetura.
+    # Serve p/ separar variantes da mesma arquitetura (ex.: cnn_lstm lagged vs
+    # sequencia) sem uma sobrescrever a outra. Gravado no config p/ o report
+    # saber a pasta certa (ver dengue_tl.paths.rotulo_de).
+    rotulo: str = ""
     lag_clima: int = 45
     lag_historico: int = 30
     raio: int = 4  # janela de 2*raio+1 == 9 linhas (modo lagged)
@@ -479,6 +484,12 @@ def _parse_args() -> argparse.Namespace:
         help="Arquitetura do modelo (cnn_lstm | cnn2d | mlp).",
     )
     parser.add_argument(
+        "--rotulo",
+        default="",
+        help="Pasta de saida (outputs/<rotulo>/); vazio usa a arquitetura. "
+        "Separa variantes da mesma arquitetura (ex.: cnn_lstm sequencia).",
+    )
+    parser.add_argument(
         "--cache-path",
         default="cache/tabela_lagged.csv",
         help="Onde salvar/ler a tabela lagged (cache).",
@@ -552,6 +563,7 @@ def main() -> None:
         csv_path=args.csv,
         cache_path=args.cache_path,
         arquitetura=args.arquitetura,
+        rotulo=args.rotulo,
         lag_clima=args.lag_clima,
         lag_historico=args.lag_historico,
         raio=args.raio,
@@ -578,7 +590,10 @@ def main() -> None:
         ),
     )
     resultado = treina_e_avalia(config)
-    output = garante_pai(args.output_json or caminho_resultado(config.arquitetura))
+    output = garante_pai(
+        args.output_json
+        or caminho_resultado(rotulo_de(config.arquitetura, config.rotulo))
+    )
     output.write_text(json.dumps(resultado, indent=2), encoding="utf-8")
     print(f"Resultado salvo em: {output}")
 

@@ -1,10 +1,12 @@
-# Contexto — Estimativa de casos de dengue com CNN-LSTM / CNN2D
+# Contexto — Estimativa de casos de dengue (MLP / CNN2D / CNN-LSTM)
 
 Trabalho de disciplina: estimar o número de casos de dengue de um dia a partir dos
-dados estruturados ao redor desse dia (uma janela 9×4), com redes convolucionais/
-recorrentes pequenas. Aplicado a Cascavel-PR. Reaproveita parte do código de uma
+dados estruturados ao redor desse dia (features climáticas e histórico **defasados**),
+com redes pequenas. Aplicado a Cascavel-PR. Reaproveita parte do código de uma
 Iniciação Científica, mas com escopo próprio (ver `roteiro.md`). As arquiteturas
-avaliadas são **CNN-LSTM**, **CNN2D** e um **MLP** baseline.
+avaliadas são **MLP** (baseline), **CNN2D** e **CNN-LSTM** — esta última também num
+**modo sequência** em que recebe a série crua e descobre a defasagem. A entrada default
+é a matriz `9×4` de features já defasadas (ver **Modo de janelamento**).
 
 ## Vocabulário
 
@@ -39,6 +41,17 @@ defasadas do dia `t` — ignora a janela de vizinhos. Duas `Dense(unidades)`→R
 o mesmo conjunto de amostras que cnn2d/cnn_lstm (comparação justa). É o contraste:
 se a janela ajuda, cnn2d/cnn_lstm devem superar este MLP.
 
+**Modo de janelamento** (`--modo`, default `lagged`): além da matriz `9×4` de features
+já defasadas (`matrix_windower`), há o **modo `sequencia`** (`sequence_windower`), em que
+a entrada é a **janela crua** dos últimos `janela_dias` dias das 4 variáveis brutas
+terminando em `t − gap_dias` — sem cravar a defasagem na engenharia. Ideia: deixar o
+**LSTM descobrir** qual defasagem importa. O `gap_dias` (≥1, default 30) preserva o
+anti-vazamento (`Qtde_Casos[t]` nunca entra) e o `Qtde_Casos[t − gap]` vira o denominador
+da log-razão e o baseline de persistência. **Achado** (sweep de robustez): o LSTM em
+sequência empata com o lagged (~29 MAE), e janelas de 20–40 dias formam um **platô raso
+indistinguível entre seeds** — a dependência útil vive em ~1 mês; o **gap/horizonte**
+domina bem mais que o tamanho da janela.
+
 **Formulação do alvo** (padrão desde jul/2026): o modelo aprende a **log-razão**
 `log1p(casos) − log1p(Historico_lag30)` — o crescimento em ~30 dias — em vez do nível
 absoluto. Motivo: o treino (2007–~2019) tem máximo de 34 casos/dia e o teste chega a 692;
@@ -53,9 +66,23 @@ antigo.
 
 **Otimização de hiperparâmetros**: `tune_runner.py` roda uma busca Optuna (TPE) sobre o
 `espaco_busca` declarado no módulo de cada arquitetura, minimizando o **MAE de validação
-na escala original**. O teste nunca entra na busca: só é usado uma vez, no retreino final
-com a melhor configuração. Os dados são preparados uma única vez (`prepara_dados`) e
-reutilizados por todos os trials.
+na escala original** (ou **RMSE**, via `--metrica-busca`). O teste nunca entra na busca:
+só é usado uma vez, no retreino final com a melhor configuração. Os dados são preparados
+uma única vez (`prepara_dados`) e reutilizados por todos os trials. A saída grava o
+`otimizacao.json` (trials + melhor config) **e** o `resultado.json` canônico (a avaliação
+final tunada), para relatórios e comparação lerem o modelo tunado direto. **Achado**:
+buscar por RMSE **piora** o teste (inclusive o próprio RMSE) — por amplificar o
+descolamento validação↔teste sob o regime de pico maior no teste —, então o default MAE
+segue melhor aqui. Trocar a métrica de ponto não ataca o gargalo; a alavanca real é a
+**estratégia de validação** (um split/CV que contenha um surto grande).
+
+**Organização de saídas**: tudo que é gerado vive sob `outputs/<rótulo>/` (ver
+`dengue_tl/paths.py`) — `resultado.json`, `otimizacao.json`, `best_config.json` e a pasta
+`relatorio/` de cada modelo, mais `outputs/comparacao/` (tabela rica + predições + gráficos
+comparativos, via `report --comparar`). O rótulo default é a arquitetura; `--rotulo` o
+sobrescreve para separar variantes da MESMA arquitetura (ex.: `cnn_lstm` lagged vs
+`cnn_lstm_sequencia`) sem uma sobrescrever a outra. `outputs/` é ignorada pelo git
+(regenerável); `cache/` é entrada, não saída.
 
 **Sazonalidade** (ablation, **DESLIGADA por padrão** desde jul/2026): a dengue em
 Cascavel é fortemente sazonal — jan–mai concentra ~94% dos casos. Dá para dar essa
@@ -83,7 +110,7 @@ cada dia de treino na loss por `1 + peso_pico·(nível/nível_max)` (nível =
 casos suavizados do dia central de treino), fazendo o otimizador priorizar a
 **amplitude** do pico. Não mexe na formulação log-razão — só realoca a atenção.
 A validação fica sem peso (não distorce EarlyStopping nem o objetivo do Optuna).
-Entra no `espaco_busca` das duas arquiteturas (faixa 0–8), então o Optuna testa
+Entra no `espaco_busca` das três arquiteturas (faixa 0–8), então o Optuna testa
 diferentes intensidades por trial: o `sample_weight` é recalculado a cada treino
 a partir do `nivel_treino` guardado em `DadosPreparados` (barato), em vez de fixo
 na preparação. Também dá para forçar um valor com `--peso-pico`. Ver
